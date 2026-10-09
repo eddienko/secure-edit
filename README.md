@@ -10,6 +10,11 @@ secure-edit a.k.a.`sedit` is a stronger take on `vim -x`: it uses authenticated 
 wrong password is rejected **before** the editor opens, and any tampering with
 the file is detected.
 
+
+<p align="center">
+  <img src="example.png" alt="secure-edit editor" width="800">
+</p>
+
 ## Features
 
 - **Strong encryption:** XChaCha20-Poly1305 with a key derived from your
