@@ -212,28 +212,33 @@ func TestParseChoice(t *testing.T) {
 
 func TestParseArgs(t *testing.T) {
 	good := map[string]opts{
-		"f":                           {mode: "edit", file: "f"},
-		"--default f":                 {mode: "edit", file: "f", choice: choiceDefault},
-		"f --custom":                  {mode: "edit", file: "f", choice: choiceCustom},
-		"-p f":                        {mode: "print", file: "f"},
-		"--passwd --default f":        {mode: "passwd", file: "f", choice: choiceDefault},
-		"--encrypt -y f":              {mode: "encrypt", file: "f", yes: true},
-		"--encrypt f -y --custom":     {mode: "encrypt", file: "f", yes: true, choice: choiceCustom},
-		"--remember --default f":      {mode: "remember", file: "f", choice: choiceDefault},
-		"--forget f":                  {mode: "forget", file: "f"},
-		"--set-default":               {mode: "set-default"},
-		"--forget-default":            {mode: "forget-default"},
-		"-h":                          {mode: "help"},
-		"--help":                      {mode: "help"},
-		"f --encrypt --help":          {mode: "help"},
-		"--version":                   {mode: "version"},
-		"--share f --to k":            {mode: "share", file: "f", to: []string{"k"}},
-		"--share f --to k1 --to k2":   {mode: "share", file: "f", to: []string{"k1", "k2"}},
-		"--to k --share f":            {mode: "share", file: "f", to: []string{"k"}},
-		"--share f -R r.txt -a":       {mode: "share", file: "f", recipFiles: []string{"r.txt"}, armor: true},
-		"--share f --to k -o out.age": {mode: "share", file: "f", to: []string{"k"}, out: "out.age"},
-		"--share f --to k -o -":       {mode: "share", file: "f", to: []string{"k"}, out: "-"},
-		"--share f --to k --armor":    {mode: "share", file: "f", to: []string{"k"}, armor: true},
+		"f":                               {mode: "edit", file: "f"},
+		"--default f":                     {mode: "edit", file: "f", choice: choiceDefault},
+		"f --custom":                      {mode: "edit", file: "f", choice: choiceCustom},
+		"-p f":                            {mode: "print", file: "f"},
+		"--passwd --default f":            {mode: "passwd", file: "f", choice: choiceDefault},
+		"--encrypt -y f":                  {mode: "encrypt", file: "f", yes: true},
+		"--encrypt f -y --custom":         {mode: "encrypt", file: "f", yes: true, choice: choiceCustom},
+		"--remember --default f":          {mode: "remember", file: "f", choice: choiceDefault},
+		"--forget f":                      {mode: "forget", file: "f"},
+		"--set-default":                   {mode: "set-default"},
+		"--forget-default":                {mode: "forget-default"},
+		"-h":                              {mode: "help"},
+		"--help":                          {mode: "help"},
+		"f --encrypt --help":              {mode: "help"},
+		"--version":                       {mode: "version"},
+		"--share f --to k":                {mode: "share", file: "f", to: []string{"k"}},
+		"--share f --to k1 --to k2":       {mode: "share", file: "f", to: []string{"k1", "k2"}},
+		"--to k --share f":                {mode: "share", file: "f", to: []string{"k"}},
+		"--share f -R r.txt -a":           {mode: "share", file: "f", recipFiles: []string{"r.txt"}, armor: true},
+		"--share f --to k -o out.age":     {mode: "share", file: "f", to: []string{"k"}, out: "out.age"},
+		"--share f --to k -o -":           {mode: "share", file: "f", to: []string{"k"}, out: "-"},
+		"--share f --to k --armor":        {mode: "share", file: "f", to: []string{"k"}, armor: true},
+		"--import f.age -i k":             {mode: "import", file: "f.age", identities: []string{"k"}},
+		"--import f.age":                  {mode: "import", file: "f.age"},
+		"--import f.age -i a -i b -o out": {mode: "import", file: "f.age", identities: []string{"a", "b"}, out: "out"},
+		"--default --import f.age":        {mode: "import", file: "f.age", choice: choiceDefault},
+		"-i k --import f.age":             {mode: "import", file: "f.age", identities: []string{"k"}},
 	}
 	for in, want := range good {
 		got, err := parseArgs(strings.Fields(in))
@@ -244,7 +249,8 @@ func TestParseArgs(t *testing.T) {
 	for _, in := range []string{"", "-p", "a b", "-x f", "-p --passwd f", "--default --custom f",
 		"-y f", "-p --default f", "--set-default f", "--forget-default f", "--forget --custom f",
 		"--share f", "--share", "--share f --to", "--share f --to k -o", "--share f --to k -o a -o b",
-		"--to k f", "-o x f", "-a f", "-R r f", "--share f --to k --default f2"} {
+		"-i k f", "--import f -i", "--import f --to k", "--import f -a", "--import f -y", "--import f -o a -o b",
+		"--share f --to k -i k2", "-o x f", "-a f", "-R r f", "--share f --to k --default f2"} {
 		if _, err := parseArgs(strings.Fields(in)); err == nil {
 			t.Errorf("%q should be rejected", in)
 		}

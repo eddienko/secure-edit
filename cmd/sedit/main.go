@@ -23,6 +23,8 @@ const usage = `usage:
                           encrypt an existing plaintext FILE in place
   sedit --share FILE (--to KEY | -R FILE)... [-o OUT] [-a]
                           write a copy of FILE for others to decrypt with "age"
+  sedit [--default|--custom] --import FILE.age [-i KEY]... [-o OUT]
+                          turn an age-encrypted FILE.age into a sedit file
   sedit --remember FILE   edit FILE and save its password in the macOS Keychain
   sedit --forget FILE     remove FILE's password from the Keychain
   sedit --set-default     store a default password in the macOS Keychain
@@ -33,7 +35,9 @@ const usage = `usage:
 --default/--custom choose the password for a new file without asking.
 --share encrypts a copy to age (age1...) or SSH public keys; OUT defaults to
 FILE.age ("-" is stdout) and -a writes ASCII armor. Recipients decrypt it with
-"age -d -i KEY" and don't need sedit.
+"age -d -i KEY" and don't need sedit. --import is the reverse: -i names your
+age or SSH private key (omit it for a passphrase-encrypted file); OUT defaults
+to FILE.age without the .age, and an existing file is never overwritten.
 A stored password (per file, then the default) is used instead of prompting.
 A symlink is followed: the file it points to is edited, locked and backed up.
 The editor is taken from $SEDIT_EDITOR, then $VISUAL, then $EDITOR, then vim or vi.
@@ -80,6 +84,8 @@ func run(args []string) error {
 		return encrypt(o.file, o.yes, o.choice)
 	case "forget":
 		return forget(o.file)
+	case "import":
+		return importFile(o.file, o.identities, o.out, o.choice)
 	case "share":
 		recips, err := collectRecipients(o.to, o.recipFiles)
 		if err != nil {
@@ -421,11 +427,26 @@ func prompt(msg string) ([]byte, error) {
 		return pw, err
 	}
 	// Non-interactive: read one line from stdin (useful for scripting/tests).
-	line, err := bufio.NewReader(os.Stdin).ReadBytes('\n')
+	line, err := stdinReader().ReadBytes('\n')
 	if err != nil && len(line) == 0 {
 		return nil, err
 	}
 	return bytes.TrimRight(line, "\r\n"), nil
+}
+
+// stdin is read through one buffered reader, so that several prompts can be
+// answered from a single pipe. A fresh reader per prompt would swallow
+// everything after the first line.
+var stdin struct {
+	file   *os.File
+	reader *bufio.Reader
+}
+
+func stdinReader() *bufio.Reader {
+	if stdin.file != os.Stdin { // first use, or os.Stdin was replaced (tests)
+		stdin.file, stdin.reader = os.Stdin, bufio.NewReader(os.Stdin)
+	}
+	return stdin.reader
 }
 
 func promptNew() ([]byte, error) {

@@ -44,6 +44,7 @@ the file is detected.
   exits with an error, or you make no changes, the file is left untouched.
 - **Sharing:** `sedit --share` writes a copy encrypted to someone's age or SSH
   public key, which they can read with the standard `age` tool and no `sedit`.
+  `sedit --import` turns such a file (or any age file) into a `sedit` file.
 - **Previous version kept:** each save keeps the old version, still encrypted,
   as `FILE.bak`.
 - **Optional Keychain support (macOS, opt-in):** remember a file's password in
@@ -97,17 +98,18 @@ go build -o sedit ./cmd/sedit
 ## Usage
 
 ```
-sedit FILE                   edit FILE (created if it doesn't exist or is empty)
-sedit -p FILE                decrypt FILE to stdout
-sedit --passwd FILE          change FILE's password
-sedit --encrypt [-y] FILE    encrypt an existing plaintext FILE in place
-sedit --share FILE --to KEY  write a copy of FILE for someone else (see below)
-sedit --remember FILE        edit FILE and save its password in the macOS Keychain
-sedit --forget FILE          remove FILE's password from the Keychain
-sedit --set-default          store a default password in the macOS Keychain
-sedit --forget-default       remove the default password
-sedit -h, --help             show usage
-sedit --version              show the version
+sedit FILE                      edit FILE (created if it doesn't exist or is empty)
+sedit -p FILE                   decrypt FILE to stdout
+sedit --passwd FILE             change FILE's password
+sedit --encrypt [-y] FILE       encrypt an existing plaintext FILE in place
+sedit --share FILE --to KEY     write a copy of FILE for someone else (see below)
+sedit --import FILE.age -i KEY  turn an age-encrypted file into a sedit file
+sedit --remember FILE           edit FILE and save its password in the macOS Keychain
+sedit --forget FILE             remove FILE's password from the Keychain
+sedit --set-default             store a default password in the macOS Keychain
+sedit --forget-default          remove the default password
+sedit -h, --help                show usage
+sedit --version                 show the version
 ```
 
 If `FILE` is a symlink, `sedit` follows it: the file it points to is edited,
@@ -235,6 +237,42 @@ Things to know:
 - After sharing, the recipient's copy is only as private as their key and their
   machine. The copy decrypts to plain text on their side.
 
+### Importing a shared file
+
+The other direction: if someone sent you a file encrypted with age (for example
+made by `sedit --share`), `--import` turns it into a `sedit` file under a password
+of your choosing, so you can keep editing it with `sedit`:
+
+```sh
+sedit --import secrets.txt.age -i ~/.ssh/id_ed25519    # writes ./secrets.txt
+sedit --import message.age -i key.txt -o notes/message.txt
+sedit --import team-notes.age                          # passphrase-encrypted file
+```
+
+It decrypts in memory and asks you for the new password (or use `--default` or
+`--custom`, as for a new file). The plaintext never touches the disk.
+
+| Option | Meaning |
+|--------|---------|
+| `-i KEY` | Your private key: an age key file (`AGE-SECRET-KEY-...` or a post-quantum `AGE-SECRET-KEY-PQ-...`) or an SSH private key. May be repeated. A passphrase-protected SSH key is fine: you are asked for its passphrase, but only if the file is actually addressed to that key. |
+| *(no `-i`)* | The file must be passphrase-encrypted (`age -p`); you are asked for the passphrase. |
+| `-o OUT` | Where to write the `sedit` file. Default: the input name without `.age`. If the input doesn't end in `.age`, `-o` is required. |
+
+Things to know:
+
+- **It never overwrites anything.** If `OUT` already exists (including a
+  symlink), `sedit` stops and tells you. It also refuses to write over the file it
+  is reading.
+- **Nothing is written on failure.** A wrong key or passphrase, a truncated or
+  tampered file, or a file that isn't an age file at all, all stop before the new
+  password is even asked for.
+- It works on any age file, not just ones from `sedit --share`. Armored (text)
+  files are detected automatically.
+- The input is read from a file, not from stdin, and is limited to 256 MiB.
+- Plugin identities (such as hardware keys) aren't supported.
+- The original `.age` file is left as it is. It stays readable by anyone who has
+  the key, so delete it if you no longer need it.
+
 ### Remembering passwords (macOS Keychain)
 
 On macOS you can opt in to storing a file's password in your login keychain:
@@ -354,10 +392,12 @@ Only one previous version is kept; each save overwrites `FILE.bak`.
 
 ### Scripting
 
-When stdin is not a terminal, the password is read as a single line from stdin:
+When stdin is not a terminal, passwords are read as lines from stdin, one per
+prompt:
 
 ```sh
 echo "$PASSWORD" | sedit -p secrets.enc
+printf '%s\n%s\n' "$OLD" "$NEW" | sedit --passwd secrets.enc   # current, then new
 ```
 
 No confirmation prompt is shown in that mode. Beware that passwords in shell
