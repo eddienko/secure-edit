@@ -1,0 +1,7 @@
+# built binary
+/sedit
+
+# lock files created next to edited files
+.*.lock
+
+.DS_Store
