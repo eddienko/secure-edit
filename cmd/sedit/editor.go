@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // runEditor writes plain to a private temp file named after the real file
@@ -32,13 +34,51 @@ func runEditor(name string, plain []byte) (edited []byte, err error) {
 		}
 	}
 	argv := editorCmd(tempName(name), script)
+	if isGUIEditor(argv[0]) {
+		fmt.Fprintf(os.Stderr, "sedit: using %q; graphical editors may keep plaintext copies in their own history and backups\n", strings.Join(argv, " "))
+	}
 	argv = append(argv, tmp)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	start := time.Now()
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("editor failed, file not changed: %w", err)
 	}
-	return os.ReadFile(tmp)
+	edited, err = os.ReadFile(tmp)
+	if err == nil && bytes.Equal(edited, plain) {
+		if d := time.Since(start); d < fastExit {
+			// Some editors (e.g. "code" without --wait) hand the file to an
+			// already running app and exit at once. Their window is then editing
+			// a temp file that is deleted as soon as we return.
+			fmt.Fprintf(os.Stderr, "sedit: warning: the editor exited after %d ms without changes.\n"+
+				"  If it opened a window and returned immediately, your edits are not being saved:\n"+
+				"  set VISUAL to a command that waits, for example VISUAL=\"code --wait\".\n", d.Milliseconds())
+		}
+	}
+	return edited, err
+}
+
+// fastExit is how quickly an editor can exit, with no changes, before we
+// suspect it detached from the terminal instead of waiting for the user.
+const fastExit = time.Second
+
+// waitEditors are graphical editors whose command returns at once unless told
+// to wait for the file to be closed. All of them accept --wait.
+var waitEditors = map[string]bool{
+	"code": true, "code-insiders": true, "codium": true, "vscodium": true,
+	"cursor": true, "windsurf": true, "zed": true, "subl": true,
+	"atom": true, "mate": true, "bbedit": true,
+}
+
+func isGUIEditor(cmd string) bool { return waitEditors[filepath.Base(cmd)] }
+
+func hasWaitFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--wait" || a == "-w" {
+			return true
+		}
+	}
+	return false
 }
 
 // statuslineEnabled reports whether the vim status line banner is wanted. It
@@ -62,7 +102,9 @@ func tempName(path string) string {
 	return base
 }
 
-// editorCmd returns the editor command line. For vim-family editors it adds
+// editorCmd returns the editor command line. For graphical editors that would
+// otherwise return immediately (VS Code, Sublime Text, ...) it adds --wait. For
+// vim-family editors it adds
 // flags that stop plaintext leaking into swap, backup, undo and viminfo files,
 // sets the terminal title, and (if script is not empty) sources script, which
 // puts a banner in the status line, so it's obvious this is a sedit session.
@@ -75,9 +117,11 @@ func editorCmd(name, script string) []string {
 		ed = "vi"
 	}
 	argv := strings.Fields(ed)
-	switch filepath.Base(argv[0]) {
-	case "vi", "vim", "nvim", "view":
+	switch base := filepath.Base(argv[0]); {
+	case base == "vi" || base == "vim" || base == "nvim" || base == "view":
 		argv = append(argv, vimArgs(name, script)...)
+	case waitEditors[base] && !hasWaitFlag(argv[1:]):
+		argv = append(argv, "--wait") // otherwise it returns before you edit
 	}
 	return argv
 }

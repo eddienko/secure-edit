@@ -323,3 +323,60 @@ func TestVimWatermarkNotWritten(t *testing.T) {
 		t.Errorf("file contains %q", b)
 	}
 }
+
+func TestEditorCmdAddsWaitForGUIEditors(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	for ed, want := range map[string]string{
+		"code":                         "code --wait",
+		"code --wait":                  "code --wait",
+		"code -w":                      "code -w",
+		"code-insiders --reuse-window": "code-insiders --reuse-window --wait",
+		"/usr/local/bin/subl":          "/usr/local/bin/subl --wait",
+		"cursor":                       "cursor --wait",
+		"zed":                          "zed --wait",
+		"nano -w":                      "nano -w", // not a GUI editor: -w means something else
+		"emacs -nw":                    "emacs -nw",
+	} {
+		t.Setenv("EDITOR", ed)
+		if got := strings.Join(editorCmd("notes.md", ""), " "); got != want {
+			t.Errorf("EDITOR=%q: got %q, want %q", ed, got, want)
+		}
+	}
+}
+
+// An editor that detaches (like "code" without --wait) must not go unnoticed.
+func TestFastExitWithoutChangesWarns(t *testing.T) {
+	useFakeStore(t)
+	dir := t.TempDir()
+	script := filepath.Join(dir, "detach.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\n( sleep 1; echo x >> \"$1\" ) &\nexit 0\n"), 0o755)
+	t.Setenv("EDITOR", script)
+	t.Setenv("VISUAL", "")
+
+	out := captureStderr(t, func() {
+		withStdin(t, "pw\n")
+		if err := edit(filepath.Join(dir, "notes.md"), false, choiceAsk); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, want := range []string{"warning: the editor exited after", "code --wait"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %q", want, out)
+		}
+	}
+}
+
+// An editor that exits quickly but did change the file is fine: no warning.
+func TestFastExitWithChangesDoesNotWarn(t *testing.T) {
+	useFakeStore(t)
+	appendEditor(t, "one") // appends and exits at once
+	out := captureStderr(t, func() {
+		withStdin(t, "pw\n")
+		if err := edit(filepath.Join(t.TempDir(), "notes.md"), false, choiceAsk); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "warning") {
+		t.Errorf("unexpected warning: %q", out)
+	}
+}

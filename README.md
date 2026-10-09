@@ -115,6 +115,23 @@ sedit --passwd secrets.enc
 For a new file you are asked for the password twice. An empty password is
 rejected.
 
+### Using a graphical editor
+
+`sedit` waits for the editor to exit, then re-encrypts the file. Many graphical
+editors hand the file to an already running app and **exit immediately**, which
+makes `sedit` think you are done: it finds the file unchanged and deletes its
+temp file while the editor is still showing it. For the common ones `sedit` adds
+the wait flag for you, so `VISUAL=code sedit FILE` runs `code --wait`:
+
+`code`, `code-insiders`, `codium`, `cursor`, `windsurf`, `zed`, `subl`, `atom`,
+`mate`, `bbedit`.
+
+For any other editor, make the command wait yourself (look for a `--wait` or `-w`
+option). If an editor exits within a second without changing the file, `sedit`
+prints a warning in case it detached. See also the limitations below: graphical
+editors may keep plaintext copies of your file, and the vim-only extras (title,
+banner, watermark) don't apply.
+
 ### Environment variables
 
 | Variable             | Effect                                                         |
@@ -297,7 +314,10 @@ defend against malware or an attacker on your machine while the file is open.
   can't guarantee otherwise. Using a RAM disk is a stronger option.
 - **Other editors may leak.** Leak protection is built in for vi, vim and nvim
   only. Editors such as VS Code, Emacs and nano may write backup, swap or
-  recovery files, so configure them yourself.
+  recovery files, so configure them yourself. Graphical editors are the worst
+  case: VS Code, for example, keeps its own Local History and hot-exit backups,
+  which can hold plaintext copies of every version you save. A terminal editor
+  with leak protection (vim) is the safer choice for secrets.
 - **Memory is not locked or reliably wiped.** Go's garbage collector can leave
   copies of the password and plaintext in memory, and memory may be swapped.
 - **Your passphrase is the weak point.** Argon2id slows brute force, but a weak
