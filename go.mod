@@ -1,4 +1,4 @@
-module sedit
+module github.com/eddienko/secure-edit
 
 go 1.26.0
 

@@ -54,10 +54,18 @@ when a `v*` tag is pushed.
 Requires Go 1.26 or newer (an older Go with `GOTOOLCHAIN=auto`, the default,
 downloads it automatically).
 
+With `go install`, which puts `sedit` in `$(go env GOBIN)` (default `~/go/bin`):
+
+```sh
+go install github.com/eddienko/secure-edit/cmd/sedit@latest
+```
+
+Or from a clone:
+
 ```sh
 git clone https://github.com/eddienko/secure-edit.git
 cd secure-edit
-go build -o sedit .
+go build -o sedit ./cmd/sedit
 # optionally: mv sedit /usr/local/bin/
 ```
 
