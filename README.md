@@ -30,7 +30,8 @@ the file is detected.
 
 ## Install
 
-Requires Go 1.25 or newer.
+Requires Go 1.26 or newer (an older Go with `GOTOOLCHAIN=auto`, the default,
+downloads it automatically).
 
 ```sh
 git clone https://github.com/eddienko/secure-edit.git
@@ -50,7 +51,12 @@ sedit --remember FILE      edit FILE and save its password in the macOS Keychain
 sedit --forget FILE        remove FILE's password from the Keychain
 sedit --set-default        store a default password in the macOS Keychain
 sedit --forget-default     remove the default password
+sedit -h, --help           show usage
+sedit --version            show the version
 ```
+
+If `FILE` is a symlink, `sedit` follows it: the file it points to is edited,
+locked and backed up, and the link itself is left alone.
 
 `--default` or `--custom` can be added to `FILE`, `--passwd` and `--encrypt` to
 choose the password for a new file without being asked (see

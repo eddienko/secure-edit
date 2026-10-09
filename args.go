@@ -30,6 +30,10 @@ func parseArgs(args []string) (opts, error) {
 
 	for _, a := range args {
 		switch {
+		case a == "-h" || a == "--help":
+			return opts{mode: "help"}, nil
+		case a == "--version":
+			return opts{mode: "version"}, nil
 		case modeFlags[a] != "":
 			if modeSet {
 				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --set-default, --forget-default may be given")

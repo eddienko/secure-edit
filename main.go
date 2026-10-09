@@ -26,9 +26,12 @@ const usage = `usage:
   sedit --forget FILE     remove FILE's password from the Keychain
   sedit --set-default     store a default password in the macOS Keychain
   sedit --forget-default  remove the default password
+  sedit -h, --help        show this help
+  sedit --version         show the version
 
 --default/--custom choose the password for a new file without asking.
 A stored password (per file, then the default) is used instead of prompting.
+A symlink is followed: the file it points to is edited, locked and backed up.
 The editor is taken from $VISUAL, then $EDITOR, then vi.`
 
 func main() {
@@ -42,6 +45,19 @@ func run(args []string) error {
 	o, err := parseArgs(args)
 	if err != nil {
 		return err
+	}
+	switch o.mode {
+	case "help":
+		fmt.Println(usage)
+		return nil
+	case "version":
+		fmt.Println("sedit", versionString())
+		return nil
+	}
+	if o.file != "" {
+		if o.file, err = resolvePath(o.file); err != nil {
+			return err
+		}
 	}
 	switch o.mode {
 	case "edit":
