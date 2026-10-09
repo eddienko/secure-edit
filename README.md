@@ -280,6 +280,48 @@ go vet ./...
 go test ./...
 ```
 
+### Publishing a new version
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+whenever a tag starting with `v` is pushed. To publish one:
+
+1. Make sure everything is committed and pushed to `main`, and that the tests
+   pass locally:
+
+   ```sh
+   go vet ./... && go test ./...
+   ```
+
+2. Pick the next version number using [semantic versioning](https://semver.org):
+   `vMAJOR.MINOR.PATCH`. Bump PATCH for fixes, MINOR for new features, and MAJOR
+   for incompatible changes (including changes to the file format).
+
+3. Tag the commit and push the tag:
+
+   ```sh
+   git tag -a v1.2.3 -m "sedit v1.2.3"
+   git push origin v1.2.3
+   ```
+
+4. Watch the run on the repository's **Actions** tab. It runs `go vet` and the
+   tests on Linux and macOS, then builds tarballs for macOS and Linux (arm64 and
+   amd64), writes `SHA256SUMS`, and creates the GitHub release with generated
+   notes. You can edit the notes afterwards on the release page.
+
+A tag containing a hyphen, such as `v1.3.0-rc1`, is published as a pre-release.
+
+To try the build without publishing anything, run the same script locally. It
+writes the tarballs and checksums to `dist/` (git-ignored):
+
+```sh
+scripts/build-release.sh v0.0.0-test
+```
+
+The version printed by `sedit --version` comes from the tag. Don't reuse or move
+a tag that has been published: the Go module proxy caches versions permanently,
+so a moved tag causes checksum errors for anyone who already fetched it. Publish
+a new version instead.
+
 ## License
 
 [MIT](LICENSE) © 2026 Eduardo Gonzalez Solares
