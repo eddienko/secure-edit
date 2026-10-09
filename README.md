@@ -18,16 +18,19 @@ the file is detected.
   editor launches. No more editing garbage.
 - **Tamper detection:** the whole file header, including the KDF parameters, is
   authenticated.
-- **Your editor:** uses `$VISUAL`, then `$EDITOR`, then `vi`. For vi, vim and
-  nvim it disables swap, backup, undo and viminfo files so plaintext isn't
-  leaked, sets the terminal title to `sedit: FILE`, and shows a
-  blue `SEDIT ENCRYPTED` banner in the status line so you can tell you are in a
-  sedit session. A small `sedit · encrypted` watermark sits at the right of the
-  first line (virtual text, so it is never saved in the file; it needs vim
-  9.0.0067 or newer, or neovim). The banner replaces your own status line for
-  that session, and plugins can't remove it. Turn both off with
-  `SEDIT_STATUSLINE=0`. The editor is given a temp file named after your real file, so
-  it shows the right name and picks the right syntax highlighting.
+- **Your editor:** uses `$SEDIT_EDITOR`, then `$VISUAL`, then `$EDITOR`, then
+  `vim` (or `vi`). Graphical editors set in `$VISUAL` or `$EDITOR` are ignored,
+  because they keep plaintext copies (see [Choosing an editor](#choosing-an-editor)).
+  The editor is given a temp file named after your real file, so it shows the
+  right name and picks the right syntax highlighting.
+- **Vim protections and cues:** for vi, vim and nvim, `sedit` disables swap,
+  backup, undo and viminfo files so plaintext isn't leaked, sets the terminal
+  title to `sedit: FILE`, and shows a blue `SEDIT ENCRYPTED` banner in the status
+  line so you can tell you are in a sedit session. A small `sedit · encrypted`
+  watermark sits at the right of the first line (virtual text, so it is never
+  saved in the file; it needs vim 9.0.0067 or newer, or neovim). The banner
+  replaces your own status line for that session, and plugins can't remove it.
+  Turn the banner and watermark off with `SEDIT_STATUSLINE=0`.
 - **Clear confirmation:** when the editor exits, `sedit` says what happened, for
   example `sedit: saved notes.txt (encrypted; password from Keychain)`, so you
   know the file was encrypted and where the password came from. Messages go to
@@ -115,28 +118,48 @@ sedit --passwd secrets.enc
 For a new file you are asked for the password twice. An empty password is
 rejected.
 
-### Using a graphical editor
+### Choosing an editor
 
-`sedit` waits for the editor to exit, then re-encrypts the file. Many graphical
-editors hand the file to an already running app and **exit immediately**, which
-makes `sedit` think you are done: it finds the file unchanged and deletes its
-temp file while the editor is still showing it. For the common ones `sedit` adds
-the wait flag for you, so `VISUAL=code sedit FILE` runs `code --wait`:
+`sedit` picks the editor from `$SEDIT_EDITOR`, then `$VISUAL`, then `$EDITOR`,
+then `vim` (or `vi` if vim isn't installed). Setting `SEDIT_EDITOR` is the way to
+use a different editor for `sedit` than for everything else:
 
-`code`, `code-insiders`, `codium`, `cursor`, `windsurf`, `zed`, `subl`, `atom`,
-`mate`, `bbedit`.
+```sh
+export SEDIT_EDITOR=vim
+```
 
-For any other editor, make the command wait yourself (look for a `--wait` or `-w`
-option). If an editor exits within a second without changing the file, `sedit`
-prints a warning in case it detached. See also the limitations below: graphical
-editors may keep plaintext copies of your file, and the vim-only extras (title,
-banner, watermark) don't apply.
+**Graphical editors are ignored by default.** If `$VISUAL` or `$EDITOR` names VS
+Code (`code`, `code-insiders`, `codium`), Cursor, Windsurf, Zed, Sublime Text
+(`subl`), Atom, TextMate (`mate`) or BBEdit, `sedit` skips it and tells you:
+
+```
+sedit: ignoring VISUAL=code (graphical editors keep plaintext copies); using vim. Set SEDIT_EDITOR to override.
+```
+
+The reason is that these editors keep their own history and backup stores
+outside `sedit`'s control (VS Code's Local History and hot-exit backups, for
+example), which can hold plaintext copies of every version you save. They also
+don't fit well with `sedit`: the vim-only extras (title, banner, watermark)
+don't apply.
+
+**To use one anyway**, say so explicitly: `SEDIT_EDITOR=code sedit FILE`. Many
+graphical editors hand the file to an already running app and **exit
+immediately**, which would make `sedit` think you are done: it would find the
+file unchanged and delete its temp file while the editor still shows it. For the
+editors above `sedit` adds `--wait` for you (so this runs `code --wait`) and
+reminds you about the plaintext copies. For any other editor, make the command
+wait yourself (look for a `--wait` or `-w` option). If an editor exits within a
+second without changing the file, `sedit` warns that it may have detached.
+
+Terminal editors such as nano and emacs are used as they are. Only vim, vi and
+nvim get the leak protections described above.
 
 ### Environment variables
 
 | Variable             | Effect                                                         |
 |----------------------|----------------------------------------------------------------|
-| `VISUAL`, `EDITOR`   | The editor to run (`VISUAL` first, then `EDITOR`, then `vi`).  |
+| `SEDIT_EDITOR`       | The editor to run, taking priority over `VISUAL` and `EDITOR`. The only way to use a graphical editor. |
+| `VISUAL`, `EDITOR`   | The editor to run if `SEDIT_EDITOR` is unset (`VISUAL` first). Graphical editors here are ignored. Default: `vim`, else `vi`. |
 | `SEDIT_STATUSLINE`   | Set to `0` (or `false`, `no`, `off`) to turn off the vim banner: the `SEDIT ENCRYPTED` status line banner and the watermark on the first line. Your own status line is left alone. The terminal title and the leak protections stay on. |
 
 To make the opt-out permanent, put `export SEDIT_STATUSLINE=0` in your shell
@@ -316,8 +339,9 @@ defend against malware or an attacker on your machine while the file is open.
   only. Editors such as VS Code, Emacs and nano may write backup, swap or
   recovery files, so configure them yourself. Graphical editors are the worst
   case: VS Code, for example, keeps its own Local History and hot-exit backups,
-  which can hold plaintext copies of every version you save. A terminal editor
-  with leak protection (vim) is the safer choice for secrets.
+  which can hold plaintext copies of every version you save. That is why `sedit`
+  ignores them unless you set `SEDIT_EDITOR`. A terminal editor with leak
+  protection (vim) is the safer choice for secrets.
 - **Memory is not locked or reliably wiped.** Go's garbage collector can leave
   copies of the password and plaintext in memory, and memory may be swapped.
 - **Your passphrase is the weak point.** Argon2id slows brute force, but a weak

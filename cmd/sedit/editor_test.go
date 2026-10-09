@@ -41,6 +41,11 @@ func TestTempName(t *testing.T) {
 	}
 }
 
+func mustCmd(name, script string) []string {
+	argv, _ := editorCmd(name, script)
+	return argv
+}
+
 func TestTitleHelpers(t *testing.T) {
 	if got := titleEscape("50%\nx\x00.txt"); got != "50%%x.txt" {
 		t.Errorf("titleEscape: %q", got)
@@ -53,11 +58,11 @@ func TestTitleHelpers(t *testing.T) {
 func TestEditorCmdOnlyAddsVimFlagsForVim(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "vim")
-	if got := strings.Join(editorCmd("notes.md", ""), " "); !strings.Contains(got, "titlestring") || !strings.Contains(got, "noswapfile") {
+	if got := strings.Join(mustCmd("notes.md", ""), " "); !strings.Contains(got, "titlestring") || !strings.Contains(got, "noswapfile") {
 		t.Errorf("vim: %q", got)
 	}
 	t.Setenv("EDITOR", "nano -w")
-	if got := editorCmd("notes.md", ""); len(got) != 2 || got[0] != "nano" {
+	if got := mustCmd("notes.md", ""); len(got) != 2 || got[0] != "nano" {
 		t.Errorf("nano: %q", got)
 	}
 }
@@ -324,8 +329,10 @@ func TestVimWatermarkNotWritten(t *testing.T) {
 	}
 }
 
+// Graphical editors are only used when asked for explicitly via SEDIT_EDITOR.
 func TestEditorCmdAddsWaitForGUIEditors(t *testing.T) {
 	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
 	for ed, want := range map[string]string{
 		"code":                         "code --wait",
 		"code --wait":                  "code --wait",
@@ -337,10 +344,104 @@ func TestEditorCmdAddsWaitForGUIEditors(t *testing.T) {
 		"nano -w":                      "nano -w", // not a GUI editor: -w means something else
 		"emacs -nw":                    "emacs -nw",
 	} {
-		t.Setenv("EDITOR", ed)
-		if got := strings.Join(editorCmd("notes.md", ""), " "); got != want {
-			t.Errorf("EDITOR=%q: got %q, want %q", ed, got, want)
+		t.Setenv("SEDIT_EDITOR", ed)
+		if got := strings.Join(mustCmd("notes.md", ""), " "); got != want {
+			t.Errorf("SEDIT_EDITOR=%q: got %q, want %q", ed, got, want)
 		}
+	}
+}
+
+func TestChooseEditor(t *testing.T) {
+	fb := fallbackEditor()
+	for _, tc := range []struct {
+		sedit, visual, editor string
+		want                  string
+		noteHas               []string // substrings; nil means no note
+	}{
+		{"", "", "", fb, nil},
+		{"", "vim", "", "vim", nil},
+		{"", "", "nano", "nano", nil},
+		{"", "emacs -nw", "nano", "emacs -nw", nil}, // VISUAL before EDITOR
+		{"nano", "vim", "vim", "nano", nil},         // SEDIT_EDITOR wins
+		{"code", "", "", "code", nil},               // explicit opt-in to a GUI editor
+		{"  ", "nano", "", "nano", nil},             // blank SEDIT_EDITOR is unset
+		{"", "code", "", fb, []string{"ignoring VISUAL=code", "using " + fb, "SEDIT_EDITOR"}},
+		{"", "", "cursor", fb, []string{"ignoring EDITOR=cursor"}},
+		{"", "code", "nano", "nano", []string{"ignoring VISUAL=code", "using nano"}},
+		{"", "code", "subl", fb, []string{"VISUAL=code", "EDITOR=subl"}},
+		{"", "/usr/local/bin/code --reuse-window", "", fb, []string{"ignoring VISUAL=/usr/local/bin/code --reuse-window"}},
+	} {
+		t.Setenv("SEDIT_EDITOR", tc.sedit)
+		t.Setenv("VISUAL", tc.visual)
+		t.Setenv("EDITOR", tc.editor)
+		got, note := chooseEditor()
+		if got != tc.want {
+			t.Errorf("%+v: editor = %q, want %q", tc, got, tc.want)
+		}
+		if tc.noteHas == nil && note != "" {
+			t.Errorf("%+v: unexpected note %q", tc, note)
+		}
+		for _, sub := range tc.noteHas {
+			if !strings.Contains(note, sub) {
+				t.Errorf("%+v: note %q lacks %q", tc, note, sub)
+			}
+		}
+	}
+}
+
+func TestFallbackEditor(t *testing.T) {
+	if got := fallbackEditor(); got != "vim" && got != "vi" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// End to end: with VISUAL=code sedit must not run "code" at all, but use vim.
+// PATH holds only fake editors, so no real editor is started.
+func TestVisualGUIEditorIsIgnoredEndToEnd(t *testing.T) {
+	useFakeStore(t)
+	bin := t.TempDir()
+	marks := t.TempDir()
+	fake := func(name string) {
+		body := "#!/bin/sh\nfor last; do :; done\necho " + name + " >> " + filepath.Join(marks, name) + "\necho x >> \"$last\"\n"
+		os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755)
+	}
+	fake("code")
+	fake("vim")
+	t.Setenv("PATH", bin)
+	t.Setenv("EDITOR", "")
+	t.Setenv("SEDIT_STATUSLINE", "0")
+	ran := func(name string) bool { _, err := os.Stat(filepath.Join(marks, name)); return err == nil }
+
+	// 1. VISUAL=code: ignored, vim is used, and the user is told.
+	t.Setenv("VISUAL", "code")
+	t.Setenv("SEDIT_EDITOR", "")
+	out := captureStderr(t, func() {
+		withStdin(t, "pw\n")
+		if err := edit(filepath.Join(t.TempDir(), "a.txt"), false, choiceAsk); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if ran("code") || !ran("vim") {
+		t.Errorf("code ran = %v, vim ran = %v", ran("code"), ran("vim"))
+	}
+	if !strings.Contains(out, "ignoring VISUAL=code") {
+		t.Errorf("no notice in %q", out)
+	}
+
+	// 2. SEDIT_EDITOR=code: explicit, so it is used (with --wait).
+	os.Remove(filepath.Join(marks, "vim"))
+	t.Setenv("SEDIT_EDITOR", "code")
+	out = captureStderr(t, func() {
+		withStdin(t, "pw\n")
+		if err := edit(filepath.Join(t.TempDir(), "b.txt"), false, choiceAsk); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !ran("code") || ran("vim") {
+		t.Errorf("code ran = %v, vim ran = %v", ran("code"), ran("vim"))
+	}
+	if !strings.Contains(out, `using "code --wait"`) || strings.Contains(out, "ignoring") {
+		t.Errorf("unexpected output %q", out)
 	}
 }
 

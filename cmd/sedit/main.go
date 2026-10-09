@@ -31,7 +31,9 @@ const usage = `usage:
 --default/--custom choose the password for a new file without asking.
 A stored password (per file, then the default) is used instead of prompting.
 A symlink is followed: the file it points to is edited, locked and backed up.
-The editor is taken from $VISUAL, then $EDITOR, then vi.
+The editor is taken from $SEDIT_EDITOR, then $VISUAL, then $EDITOR, then vim or vi.
+Graphical editors (VS Code, ...) in $VISUAL or $EDITOR are ignored, because they
+keep plaintext copies; set $SEDIT_EDITOR to use one anyway.
 Set SEDIT_STATUSLINE=0 to turn off the SEDIT ENCRYPTED status line banner and
 watermark that sedit adds to vim.`
 

@@ -33,7 +33,10 @@ func runEditor(name string, plain []byte) (edited []byte, err error) {
 			return nil, err
 		}
 	}
-	argv := editorCmd(tempName(name), script)
+	argv, note := editorCmd(tempName(name), script)
+	if note != "" {
+		fmt.Fprintln(os.Stderr, "sedit:", note)
+	}
 	if isGUIEditor(argv[0]) {
 		fmt.Fprintf(os.Stderr, "sedit: using %q; graphical editors may keep plaintext copies in their own history and backups\n", strings.Join(argv, " "))
 	}
@@ -102,28 +105,63 @@ func tempName(path string) string {
 	return base
 }
 
-// editorCmd returns the editor command line. For graphical editors that would
-// otherwise return immediately (VS Code, Sublime Text, ...) it adds --wait. For
-// vim-family editors it adds
-// flags that stop plaintext leaking into swap, backup, undo and viminfo files,
-// sets the terminal title, and (if script is not empty) sources script, which
-// puts a banner in the status line, so it's obvious this is a sedit session.
-func editorCmd(name, script string) []string {
-	ed := os.Getenv("VISUAL")
-	if ed == "" {
-		ed = os.Getenv("EDITOR")
-	}
-	if ed == "" {
-		ed = "vi"
-	}
-	argv := strings.Fields(ed)
+// editorCmd returns the editor command line, and a note for the user if the
+// editor they configured was not used.
+//
+// For graphical editors that would otherwise return immediately (VS Code,
+// Sublime Text, ...) it adds --wait. For vim-family editors it adds flags that
+// stop plaintext leaking into swap, backup, undo and viminfo files, sets the
+// terminal title, and (if script is not empty) sources script, which puts a
+// banner in the status line, so it's obvious this is a sedit session.
+func editorCmd(name, script string) (argv []string, note string) {
+	ed, note := chooseEditor()
+	argv = strings.Fields(ed)
 	switch base := filepath.Base(argv[0]); {
 	case base == "vi" || base == "vim" || base == "nvim" || base == "view":
 		argv = append(argv, vimArgs(name, script)...)
 	case waitEditors[base] && !hasWaitFlag(argv[1:]):
 		argv = append(argv, "--wait") // otherwise it returns before you edit
 	}
-	return argv
+	return argv, note
+}
+
+// chooseEditor picks the editor: $SEDIT_EDITOR, then $VISUAL, then $EDITOR,
+// then vim (or vi). A graphical editor taken from $VISUAL or $EDITOR is
+// ignored, because such editors keep plaintext copies in their own history and
+// backups; setting $SEDIT_EDITOR is the explicit way to use one anyway.
+func chooseEditor() (ed, note string) {
+	if v := strings.TrimSpace(os.Getenv("SEDIT_EDITOR")); v != "" {
+		return v, ""
+	}
+	var ignored []string
+	for _, env := range []string{"VISUAL", "EDITOR"} {
+		v := strings.TrimSpace(os.Getenv(env))
+		if v == "" {
+			continue
+		}
+		if isGUIEditor(strings.Fields(v)[0]) {
+			ignored = append(ignored, env+"="+v)
+			continue
+		}
+		ed = v
+		break
+	}
+	if ed == "" {
+		ed = fallbackEditor()
+	}
+	if len(ignored) > 0 {
+		note = fmt.Sprintf("ignoring %s (graphical editors keep plaintext copies); using %s. Set SEDIT_EDITOR to override.",
+			strings.Join(ignored, ", "), ed)
+	}
+	return ed, note
+}
+
+// fallbackEditor is vim if it is installed, otherwise vi.
+func fallbackEditor() string {
+	if _, err := exec.LookPath("vim"); err == nil {
+		return "vim"
+	}
+	return "vi"
 }
 
 func vimArgs(name, script string) []string {
