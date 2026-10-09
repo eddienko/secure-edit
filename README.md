@@ -21,6 +21,10 @@ the file is detected.
   exits with an error, or you make no changes, the file is left untouched.
 - **Previous version kept:** each save keeps the old version, still encrypted,
   as `FILE.bak`.
+- **Optional Keychain support (macOS, opt-in):** remember a file's password in
+  the login keychain so you don't retype it. Off by default; see
+  [Remembering passwords](#remembering-passwords-macos-keychain) for the
+  security trade-off.
 - **Concurrent-edit protection:** a lock prevents two `sedit` processes from
   editing the same file at once.
 
@@ -42,6 +46,8 @@ sedit FILE                 edit FILE (created if it doesn't exist or is empty)
 sedit -p FILE              decrypt FILE to stdout
 sedit --passwd FILE        change FILE's password
 sedit --encrypt [-y] FILE  encrypt an existing plaintext FILE in place
+sedit --remember FILE      edit FILE and save its password in the macOS Keychain
+sedit --forget FILE        remove FILE's password from the Keychain
 ```
 
 ```sh
@@ -67,6 +73,49 @@ sedit --encrypt -y notes.txt   # skip the confirmation (required without a termi
 It refuses files that are already encrypted or empty. An empty file needs no
 conversion: `sedit FILE` treats it as new. No `.bak` is created, because it would
 be a plaintext copy. See the limitations below about the old plaintext.
+
+### Remembering passwords (macOS Keychain)
+
+On macOS you can opt in to storing a file's password in your login keychain:
+
+```sh
+sedit --remember secrets.enc   # prompts once, then stores the password
+sedit secrets.enc              # no prompt from now on (also works with -p, --passwd)
+sedit --forget secrets.enc     # remove it again
+```
+
+Nothing is stored unless you pass `--remember`. If a stored password stops
+working (for example the file was re-keyed elsewhere), `sedit` removes it and
+asks you to type the password. `--passwd` keeps an existing stored entry up to
+date. Entries are keyed by the file's absolute path, so moving or renaming the
+file means running `--remember` again. The file format is unchanged: a file can
+always be opened by typing its password, on any platform.
+
+**This weakens your security, so be aware of what you are trading.**
+
+- The password is stored using the `/usr/bin/security` tool, which is trusted on
+  the items it creates. While your login keychain is unlocked (normally whenever
+  you are logged in), **any program running as your user can read the password
+  without a prompt**, for example with
+  `security find-generic-password -s sedit -a /path/to/file -w`. That includes
+  malware and malicious scripts you run by accident.
+- There is no Touch ID or password prompt per use. Doing that properly would need
+  a code-signed binary with keychain entitlements, which this project
+  deliberately doesn't require.
+- So the practical protection of a remembered file becomes "whoever is logged in
+  as you", not "whoever knows the passphrase". The encryption itself is just as
+  strong; the passphrase is what's exposed.
+- The login keychain file (`~/Library/Keychains/login.keychain-db`) is included
+  in ordinary backups such as Time Machine, and it is protected by your login
+  password.
+- The password is passed to `security` through stdin, so it does not appear in the
+  process list, and is base64-encoded in the keychain, which is encoding, not
+  protection.
+
+Use it for convenience on a machine you trust. Don't use it for files where the
+passphrase is the only thing standing between an attacker with your account and
+the contents. On other platforms `--remember` and `--forget` report that they
+aren't supported.
 
 ### Restoring the previous version
 
@@ -130,6 +179,9 @@ defend against malware or an attacker on your machine while the file is open.
 - **Converted plaintext isn't erased.** After `--encrypt`, the original plaintext
   may remain in freed disk blocks, backups, Time Machine snapshots or editor
   files. Treat the old contents as exposed, and rotate any credentials in it.
+- **Remembered passwords are readable by any process running as you.** See
+  [Remembering passwords](#remembering-passwords-macos-keychain). Only use
+  `--remember` where that is acceptable.
 - **Single backup generation.** Only the immediately preceding version is kept.
 - **Lock file is advisory and local.** The lock is an `flock` on `.FILE.lock`,
   which is left on disk (empty) after exit. It is released automatically if

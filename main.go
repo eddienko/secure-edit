@@ -20,6 +20,10 @@ const usage = `usage:
   sedit --passwd FILE     change FILE's password
   sedit --encrypt [-y] FILE
                           encrypt an existing plaintext FILE in place
+  sedit --remember FILE   edit FILE and save its password in the macOS Keychain
+  sedit --forget FILE     remove FILE's password from the Keychain
+
+If a password is stored for FILE it is used instead of prompting.
 
 The editor is taken from $VISUAL, then $EDITOR, then vi.`
 
@@ -33,7 +37,11 @@ func main() {
 func run(args []string) error {
 	switch {
 	case len(args) == 1 && !strings.HasPrefix(args[0], "-"):
-		return edit(args[0])
+		return edit(args[0], false)
+	case len(args) == 2 && args[0] == "--remember":
+		return edit(args[1], true)
+	case len(args) == 2 && args[0] == "--forget":
+		return forget(args[1])
 	case len(args) == 2 && args[0] == "-p":
 		return print(args[1])
 	case len(args) == 2 && args[0] == "--passwd":
@@ -46,7 +54,10 @@ func run(args []string) error {
 	return errors.New(usage)
 }
 
-func edit(path string) error {
+func edit(path string, remember bool) (err error) {
+	if remember && store == nil {
+		return errNoStore
+	}
 	unlock, err := Lock(path)
 	if err != nil {
 		return err
@@ -68,16 +79,18 @@ func edit(path string) error {
 		if err := requireSedit(path, data); err != nil {
 			return err
 		}
-		if password, err = prompt("Password: "); err != nil {
-			return err
-		}
 		// Fail before launching the editor if the password is wrong.
-		if plain, err = Decrypt(password, data); err != nil {
+		if password, plain, _, err = openExisting(path, data); err != nil {
 			return err
 		}
 	}
 	defer wipe(password)
 	defer wipe(plain)
+	defer func() {
+		if err == nil && remember {
+			err = storePassword(path, password)
+		}
+	}()
 
 	edited, err := runEditor(plain)
 	if err != nil {
@@ -99,6 +112,65 @@ func edit(path string) error {
 		}
 	}
 	return writeAtomic(path, out)
+}
+
+var errNoStore = errors.New("storing passwords isn't supported on this platform")
+
+// openExisting decrypts data, using the stored password if there is one and
+// falling back to prompting. A stored password that no longer works is removed.
+func openExisting(path string, data []byte) (password, plain []byte, wasStored bool, err error) {
+	if store != nil {
+		if acct, aerr := account(path); aerr == nil {
+			pw, gerr := store.Get(acct)
+			switch {
+			case gerr == nil:
+				if plain, err = Decrypt(pw, data); err == nil {
+					return pw, plain, true, nil
+				}
+				wipe(pw)
+				if !errors.Is(err, ErrBadPassword) {
+					return nil, nil, false, err
+				}
+				store.Delete(acct)
+				fmt.Fprintln(os.Stderr, "sedit: stored password no longer works; removed it")
+			case !errors.Is(gerr, ErrNotFound):
+				fmt.Fprintln(os.Stderr, "sedit: can't read stored password:", gerr)
+			}
+		}
+	}
+	if password, err = prompt("Password: "); err != nil {
+		return nil, nil, false, err
+	}
+	if plain, err = Decrypt(password, data); err != nil {
+		wipe(password)
+		return nil, nil, false, err
+	}
+	return password, plain, false, nil
+}
+
+func storePassword(path string, password []byte) error {
+	acct, err := account(path)
+	if err != nil {
+		return err
+	}
+	return store.Set(acct, password)
+}
+
+func forget(path string) error {
+	if store == nil {
+		return errNoStore
+	}
+	acct, err := account(path)
+	if err != nil {
+		return err
+	}
+	if err := store.Delete(acct); errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("no stored password for %s", path)
+	} else if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "removed stored password for", path)
+	return nil
 }
 
 func backupPath(path string) string { return path + ".bak" }
@@ -168,15 +240,11 @@ func print(path string) error {
 	if err := requireSedit(path, data); err != nil {
 		return err
 	}
-	password, err := prompt("Password: ")
+	password, plain, _, err := openExisting(path, data)
 	if err != nil {
 		return err
 	}
 	defer wipe(password)
-	plain, err := Decrypt(password, data)
-	if err != nil {
-		return err
-	}
 	defer wipe(plain)
 	_, err = os.Stdout.Write(plain)
 	return err
@@ -196,15 +264,11 @@ func passwd(path string) error {
 	if err := requireSedit(path, data); err != nil {
 		return err
 	}
-	old, err := prompt("Current password: ")
+	old, plain, wasStored, err := openExisting(path, data)
 	if err != nil {
 		return err
 	}
 	defer wipe(old)
-	plain, err := Decrypt(old, data)
-	if err != nil {
-		return err
-	}
 	defer wipe(plain)
 	password, err := promptNew()
 	if err != nil {
@@ -218,7 +282,15 @@ func passwd(path string) error {
 	if _, err := os.Stat(backupPath(path)); err == nil {
 		fmt.Fprintf(os.Stderr, "warning: %s is still encrypted with the old password\n", backupPath(path))
 	}
-	return writeAtomic(path, out)
+	if err := writeAtomic(path, out); err != nil {
+		return err
+	}
+	if wasStored {
+		if err := storePassword(path, password); err != nil {
+			return fmt.Errorf("password changed, but updating the stored one failed (run \"sedit --forget %s\"): %w", path, err)
+		}
+	}
+	return nil
 }
 
 // runEditor writes plain to a private temp file, runs the editor on it, and
