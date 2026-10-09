@@ -162,6 +162,35 @@ passphrase is the only thing standing between an attacker with your account and
 the contents. On other platforms `--remember` and `--forget` report that they
 aren't supported.
 
+**Cleaning up stale entries.** A stored password that no longer opens its file is
+removed automatically the next time you use that file. But if you **move, rename
+or delete** a file you had remembered, nothing notices: its entry stays in the
+keychain, still holding a working password that any program running as you can
+read. `sedit` can't list its entries, so clean them up yourself:
+
+```sh
+sedit --forget /old/path/to/secrets.enc
+```
+
+This works when the path has no symlinked directories in it. Entries are stored
+under the fully resolved path, which `sedit` can only work out for a file that
+still exists. If it says "no stored password" for a path you know was
+remembered, give it the fully resolved path instead (for example
+`/private/tmp/...` rather than `/tmp/...`):
+
+```sh
+sedit --forget /private/tmp/old/secrets.enc
+```
+
+You can also delete an entry directly with the `security` tool:
+
+```sh
+security delete-generic-password -s sedit -a /resolved/path/to/secrets.enc
+```
+
+Or open **Keychain Access**, search for `sedit`, and delete the entries you no
+longer need. The default password is stored under the account name `<default>`.
+
 ### Default password (macOS Keychain)
 
 For a mix of convenience files and sensitive files, you can store one **default**
