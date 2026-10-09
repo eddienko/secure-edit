@@ -31,7 +31,8 @@ const usage = `usage:
 --default/--custom choose the password for a new file without asking.
 A stored password (per file, then the default) is used instead of prompting.
 A symlink is followed: the file it points to is edited, locked and backed up.
-The editor is taken from $VISUAL, then $EDITOR, then vi.`
+The editor is taken from $VISUAL, then $EDITOR, then vi.
+Set SEDIT_STATUSLINE=0 to stop sedit replacing vim's status line with a banner.`
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

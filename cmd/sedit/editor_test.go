@@ -53,11 +53,11 @@ func TestTitleHelpers(t *testing.T) {
 func TestEditorCmdOnlyAddsVimFlagsForVim(t *testing.T) {
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "vim")
-	if got := strings.Join(editorCmd("notes.md"), " "); !strings.Contains(got, "titlestring") || !strings.Contains(got, "noswapfile") {
+	if got := strings.Join(editorCmd("notes.md", ""), " "); !strings.Contains(got, "titlestring") || !strings.Contains(got, "noswapfile") {
 		t.Errorf("vim: %q", got)
 	}
 	t.Setenv("EDITOR", "nano -w")
-	if got := editorCmd("notes.md"); len(got) != 2 || got[0] != "nano" {
+	if got := editorCmd("notes.md", ""); len(got) != 2 || got[0] != "nano" {
 		t.Errorf("nano: %q", got)
 	}
 }
@@ -76,7 +76,7 @@ func TestVimTitleWithAwkwardNames(t *testing.T) {
 		os.Remove(out)
 		file := filepath.Join(dir, "plain.txt")
 		os.WriteFile(file, []byte("x\n"), 0o600)
-		args := append([]string{"-es", "-u", "NONE"}, vimArgs(name)...)
+		args := append([]string{"-es", "-u", "NONE"}, vimArgs(name, "")...)
 		args = append(args,
 			"-c", "call writefile([&titlestring, &title ? 'on' : 'off'], '"+out+"')",
 			"-c", "qa!", file)
@@ -205,4 +205,105 @@ func mustAccount(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return a
+}
+
+// runVim runs vim headless with sedit's args and script on a throwaway file,
+// then evaluates the given Ex commands and returns what writefile() produced.
+func runVim(t *testing.T, name string, ex ...string) string {
+	t.Helper()
+	vim, err := exec.LookPath("vim")
+	if err != nil {
+		t.Skip("vim not installed")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "sedit.vim")
+	if err := os.WriteFile(script, []byte(vimScript(name)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "plain.txt")
+	os.WriteFile(file, []byte("x\n"), 0o600)
+	args := append([]string{"-es", "-u", "NONE"}, vimArgs(name, script)...)
+	// vim accepts at most 10 -c commands, so run the checks as one.
+	args = append(args, "-c", strings.Join(ex, " | "), "-c", "qa!", file)
+	if b, err := exec.Command(vim, args...).CombinedOutput(); err != nil {
+		t.Fatalf("vim failed: %v\n%s", err, b)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "out"))
+	if err != nil {
+		t.Fatalf("no output: %v", err)
+	}
+	return string(b)
+}
+
+func TestVimStatusLine(t *testing.T) {
+	for _, name := range []string{"notes.md", "my file.txt", "it's.txt", "50%.txt", `a|b.txt`, `a"b.txt`, `back\slash.txt`} {
+		out := runVim(t, name,
+			"call writefile([&statusline, &laststatus, hlexists('SeditBanner') ? 'hl' : 'nohl'], expand('%:h') . '/out')")
+		want := "%#SeditBanner# SEDIT ENCRYPTED %* " + titleEscape(name) + "%m%r%=%l,%c  %P \n2\nhl\n"
+		if out != want {
+			t.Errorf("%q: got %q, want %q", name, out, want)
+		}
+	}
+}
+
+// A status line plugin or a colorscheme must not be able to remove the banner.
+func TestVimStatusLineSurvivesOverrides(t *testing.T) {
+	out := runVim(t, "notes.md",
+		"set statusline=PLUGIN",
+		"doautocmd WinEnter",
+		"let a = &statusline",
+		"colorscheme default",
+		"let b = synIDattr(hlID('SeditBanner'), 'bg', 'cterm')",
+		"call writefile([a, b], expand('%:h') . '/out')")
+	lines := strings.Split(out, "\n")
+	if !strings.Contains(lines[0], "SEDIT ENCRYPTED") {
+		t.Errorf("plugin overrode the banner: %q", lines[0])
+	}
+	if lines[1] != "24" {
+		t.Errorf("highlight lost after colorscheme change: %q", lines[1])
+	}
+}
+
+func TestStatuslineEnabled(t *testing.T) {
+	for val, want := range map[string]bool{
+		"": true, "1": true, "yes": true, "on": true, "anything": true,
+		"0": false, "false": false, "FALSE": false, "no": false, "Off": false, " 0 ": false,
+	} {
+		t.Setenv("SEDIT_STATUSLINE", val)
+		if got := statuslineEnabled(); got != want {
+			t.Errorf("SEDIT_STATUSLINE=%q: got %v, want %v", val, got, want)
+		}
+	}
+}
+
+// With SEDIT_STATUSLINE=0 no vim script is written and -S isn't passed.
+func TestStatuslineOptOut(t *testing.T) {
+	useFakeStore(t)
+	for _, tc := range []struct {
+		env     string
+		wantVim bool
+	}{{"", true}, {"0", false}} {
+		dir := t.TempDir()
+		seen := filepath.Join(dir, "seen")
+		script := filepath.Join(dir, "ed.sh")
+		os.WriteFile(script, []byte("#!/bin/sh\nls \"$(dirname \"$1\")\" > "+seen+"\necho x >> \"$1\"\n"), 0o755)
+		t.Setenv("EDITOR", script)
+		t.Setenv("VISUAL", "")
+		t.Setenv("SEDIT_STATUSLINE", tc.env)
+
+		withStdin(t, "pw\n")
+		if err := edit(filepath.Join(dir, "notes.md"), false, choiceAsk); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(seen)
+		if got := strings.Contains(string(b), "sedit.vim"); got != tc.wantVim {
+			t.Errorf("SEDIT_STATUSLINE=%q: vim script present = %v, want %v (dir: %q)", tc.env, got, tc.wantVim, b)
+		}
+	}
+
+	t.Setenv("EDITOR", "vim")
+	t.Setenv("SEDIT_STATUSLINE", "0")
+	if got := strings.Join(editorCmd("notes.md", ""), " "); strings.Contains(got, "-S") || !strings.Contains(got, "titlestring") {
+		t.Errorf("opt-out args: %q", got)
+	}
 }

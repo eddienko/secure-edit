@@ -20,8 +20,10 @@ the file is detected.
   authenticated.
 - **Your editor:** uses `$VISUAL`, then `$EDITOR`, then `vi`. For vi, vim and
   nvim it disables swap, backup, undo and viminfo files so plaintext isn't
-  leaked, and sets the terminal title to `sedit: FILE` so you can tell you are in
-  a sedit session. The editor is given a temp file named after your real file, so
+  leaked, sets the terminal title to `sedit: FILE`, and shows a
+  `SEDIT ENCRYPTED` banner in the status line so you can tell you are in a sedit
+  session. The banner replaces your own status line for that session (and
+  status line plugins can't remove it); turn it off with `SEDIT_STATUSLINE=0`. The editor is given a temp file named after your real file, so
   it shows the right name and picks the right syntax highlighting.
 - **Clear confirmation:** when the editor exits, `sedit` says what happened, for
   example `sedit: saved notes.txt (encrypted; password from Keychain)`, so you
@@ -109,6 +111,16 @@ sedit --passwd secrets.enc
 
 For a new file you are asked for the password twice. An empty password is
 rejected.
+
+### Environment variables
+
+| Variable             | Effect                                                         |
+|----------------------|----------------------------------------------------------------|
+| `VISUAL`, `EDITOR`   | The editor to run (`VISUAL` first, then `EDITOR`, then `vi`).  |
+| `SEDIT_STATUSLINE`   | Set to `0` (or `false`, `no`, `off`) to stop `sedit` replacing vim's status line with the `SEDIT ENCRYPTED` banner. The terminal title and the leak protections stay on. |
+
+To make the opt-out permanent, put `export SEDIT_STATUSLINE=0` in your shell
+profile. Anything else, or leaving it unset, keeps the banner.
 
 ### Converting an existing plaintext file
 
