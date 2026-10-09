@@ -21,6 +21,8 @@ const usage = `usage:
                           change FILE's password
   sedit [--default|--custom] --encrypt [-y] FILE
                           encrypt an existing plaintext FILE in place
+  sedit --share FILE (--to KEY | -R FILE)... [-o OUT] [-a]
+                          write a copy of FILE for others to decrypt with "age"
   sedit --remember FILE   edit FILE and save its password in the macOS Keychain
   sedit --forget FILE     remove FILE's password from the Keychain
   sedit --set-default     store a default password in the macOS Keychain
@@ -29,6 +31,9 @@ const usage = `usage:
   sedit --version         show the version
 
 --default/--custom choose the password for a new file without asking.
+--share encrypts a copy to age (age1...) or SSH public keys; OUT defaults to
+FILE.age ("-" is stdout) and -a writes ASCII armor. Recipients decrypt it with
+"age -d -i KEY" and don't need sedit.
 A stored password (per file, then the default) is used instead of prompting.
 A symlink is followed: the file it points to is edited, locked and backed up.
 The editor is taken from $SEDIT_EDITOR, then $VISUAL, then $EDITOR, then vim or vi.
@@ -75,6 +80,12 @@ func run(args []string) error {
 		return encrypt(o.file, o.yes, o.choice)
 	case "forget":
 		return forget(o.file)
+	case "share":
+		recips, err := collectRecipients(o.to, o.recipFiles)
+		if err != nil {
+			return err
+		}
+		return share(o.file, recips, o.out, o.armor)
 	case "set-default":
 		return setDefault()
 	default: // forget-default

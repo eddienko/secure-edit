@@ -42,6 +42,8 @@ the file is detected.
   stderr, so `sedit -p FILE | ...` output is unaffected.
 - **Safe saves:** written atomically (temp file, fsync, rename). If the editor
   exits with an error, or you make no changes, the file is left untouched.
+- **Sharing:** `sedit --share` writes a copy encrypted to someone's age or SSH
+  public key, which they can read with the standard `age` tool and no `sedit`.
 - **Previous version kept:** each save keeps the old version, still encrypted,
   as `FILE.bak`.
 - **Optional Keychain support (macOS, opt-in):** remember a file's password in
@@ -95,16 +97,17 @@ go build -o sedit ./cmd/sedit
 ## Usage
 
 ```
-sedit FILE                 edit FILE (created if it doesn't exist or is empty)
-sedit -p FILE              decrypt FILE to stdout
-sedit --passwd FILE        change FILE's password
-sedit --encrypt [-y] FILE  encrypt an existing plaintext FILE in place
-sedit --remember FILE      edit FILE and save its password in the macOS Keychain
-sedit --forget FILE        remove FILE's password from the Keychain
-sedit --set-default        store a default password in the macOS Keychain
-sedit --forget-default     remove the default password
-sedit -h, --help           show usage
-sedit --version            show the version
+sedit FILE                   edit FILE (created if it doesn't exist or is empty)
+sedit -p FILE                decrypt FILE to stdout
+sedit --passwd FILE          change FILE's password
+sedit --encrypt [-y] FILE    encrypt an existing plaintext FILE in place
+sedit --share FILE --to KEY  write a copy of FILE for someone else (see below)
+sedit --remember FILE        edit FILE and save its password in the macOS Keychain
+sedit --forget FILE          remove FILE's password from the Keychain
+sedit --set-default          store a default password in the macOS Keychain
+sedit --forget-default       remove the default password
+sedit -h, --help             show usage
+sedit --version              show the version
 ```
 
 If `FILE` is a symlink, `sedit` follows it: the file it points to is edited,
@@ -184,6 +187,53 @@ sedit --encrypt -y notes.txt   # skip the confirmation (required without a termi
 It refuses files that are already encrypted or empty. An empty file needs no
 conversion: `sedit FILE` treats it as new. No `.bak` is created, because it would
 be a plaintext copy. See the limitations below about the old plaintext.
+
+### Sharing a file with someone
+
+A `sedit` file can only be opened with its password. To give someone a copy they
+can read without knowing it, encrypt a copy to their public key using
+[age](https://age-encryption.org):
+
+```sh
+sedit --share secrets.txt --to age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+sedit --share secrets.txt --to "ssh-ed25519 AAAA... alice@laptop"
+sedit --share secrets.txt -R alice.pub -R bob.pub -o for-the-team.age
+```
+
+`sedit` decrypts the file in memory and writes the copy, so the plaintext never
+touches the disk and no editor is involved. The recipient decrypts it with the
+ordinary `age` command and doesn't need `sedit`:
+
+```sh
+age -d -i ~/.ssh/id_ed25519 secrets.txt.age      # with their SSH key
+age -d -i key.txt secrets.txt.age                # with an age key
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--to KEY` | A recipient's public key: an age key (`age1...`, or a post-quantum `age1pq1...`) or an SSH public key (`ssh-ed25519`, `ssh-rsa`). Repeat it for several recipients. |
+| `-R FILE` | A file of public keys, one per line (`#` comments and blank lines are ignored). An SSH `.pub` file works as it is. May be repeated. |
+| `-o OUT` | Where to write the copy. Default: `FILE.age` next to the original. `-o -` writes to stdout. An existing `OUT` is replaced. |
+| `-a`, `--armor` | Write text (ASCII armor) instead of binary, for pasting into an email or chat. Binary output to a terminal is refused. |
+
+Things to know:
+
+- **It is a snapshot, in one direction.** The recipient gets a copy of the
+  contents as they are now. Their changes don't come back, and later changes of
+  yours don't reach them. Share again to send an update.
+- **Check the key.** Make sure the public key really belongs to the person, for
+  example by confirming it with them over another channel. `sedit` can't know.
+- **You can't take it back.** Anyone who has the copy and their key can read it,
+  for as long as they keep it.
+- **No mixing post-quantum and classic keys.** `age` refuses a file addressed to
+  both kinds, so give either `age1pq1...` keys only, or classic keys only.
+- **Not supported:** `age` plugin recipients (`age1yubikey...`, which need an
+  external program) and tagged recipients. Private keys are rejected, and are
+  never echoed back.
+- `--share` never overwrites the `sedit` file it reads from, even through a
+  symlink or hard link, and it leaves the original untouched.
+- After sharing, the recipient's copy is only as private as their key and their
+  machine. The copy decrypts to plain text on their side.
 
 ### Remembering passwords (macOS Keychain)
 

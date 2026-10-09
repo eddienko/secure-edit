@@ -6,10 +6,16 @@ import (
 )
 
 type opts struct {
-	mode   string // edit, print, passwd, encrypt, remember, forget, set-default, forget-default
+	mode   string // edit, print, passwd, encrypt, remember, forget, share, set-default, forget-default
 	file   string
 	yes    bool
 	choice pwChoice
+
+	// --share
+	to         []string // --to KEY
+	recipFiles []string // -R FILE
+	out        string   // -o OUT
+	armor      bool     // -a
 }
 
 var modeFlags = map[string]string{
@@ -18,6 +24,7 @@ var modeFlags = map[string]string{
 	"--encrypt":        "encrypt",
 	"--remember":       "remember",
 	"--forget":         "forget",
+	"--share":          "share",
 	"--set-default":    "set-default",
 	"--forget-default": "forget-default",
 }
@@ -28,7 +35,16 @@ func parseArgs(args []string) (opts, error) {
 	modeSet, choiceSet := false, false
 	bad := func(msg string) (opts, error) { return opts{}, fmt.Errorf("%s\n\n%s", msg, usage) }
 
-	for _, a := range args {
+	// value returns the argument after args[i], which belongs to the flag at i.
+	value := func(i int) (string, bool) {
+		if i+1 >= len(args) {
+			return "", false
+		}
+		return args[i+1], true
+	}
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch {
 		case a == "-h" || a == "--help":
 			return opts{mode: "help"}, nil
@@ -36,11 +52,30 @@ func parseArgs(args []string) (opts, error) {
 			return opts{mode: "version"}, nil
 		case modeFlags[a] != "":
 			if modeSet {
-				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --set-default, --forget-default may be given")
+				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --set-default, --forget-default may be given")
 			}
 			o.mode, modeSet = modeFlags[a], true
 		case a == "-y":
 			o.yes = true
+		case a == "-a" || a == "--armor":
+			o.armor = true
+		case a == "--to" || a == "-R" || a == "-o":
+			v, ok := value(i)
+			if !ok {
+				return bad(a + " needs a value")
+			}
+			i++
+			switch a {
+			case "--to":
+				o.to = append(o.to, v)
+			case "-R":
+				o.recipFiles = append(o.recipFiles, v)
+			default:
+				if o.out != "" {
+					return bad("only one -o may be given")
+				}
+				o.out = v
+			}
 		case a == "--default" || a == "--custom":
 			c := choiceDefault
 			if a == "--custom" {
@@ -67,6 +102,10 @@ func parseArgs(args []string) (opts, error) {
 		return bad(fmt.Sprintf("--%s takes no FILE", o.mode))
 	case o.yes && o.mode != "encrypt":
 		return bad("-y only applies to --encrypt")
+	case o.mode == "share" && len(o.to) == 0 && len(o.recipFiles) == 0:
+		return bad("--share needs at least one recipient (--to KEY or -R FILE)")
+	case o.mode != "share" && (len(o.to) > 0 || len(o.recipFiles) > 0 || o.out != "" || o.armor):
+		return bad("--to, -R, -o and -a only apply to --share")
 	case choiceSet && o.mode != "edit" && o.mode != "remember" && o.mode != "passwd" && o.mode != "encrypt":
 		return bad("--default and --custom only apply when choosing a new password")
 	}
