@@ -48,7 +48,13 @@ sedit --passwd FILE        change FILE's password
 sedit --encrypt [-y] FILE  encrypt an existing plaintext FILE in place
 sedit --remember FILE      edit FILE and save its password in the macOS Keychain
 sedit --forget FILE        remove FILE's password from the Keychain
+sedit --set-default        store a default password in the macOS Keychain
+sedit --forget-default     remove the default password
 ```
+
+`--default` or `--custom` can be added to `FILE`, `--passwd` and `--encrypt` to
+choose the password for a new file without being asked (see
+[Default password](#default-password-macos-keychain)).
 
 ```sh
 sedit secrets.enc            # prompts for a password, opens $EDITOR
@@ -117,6 +123,42 @@ passphrase is the only thing standing between an attacker with your account and
 the contents. On other platforms `--remember` and `--forget` report that they
 aren't supported.
 
+### Default password (macOS Keychain)
+
+For a mix of convenience files and sensitive files, you can store one **default**
+password and decide per file whether to use it:
+
+```sh
+sedit --set-default            # prompts for the default password, stores it
+sedit notes.enc                # new file: asks "[d]efault or [c]ustom?"
+sedit --default todo.enc       # new file with the default, no questions
+sedit --custom bank.enc        # new file with its own password
+sedit --passwd --custom todo.enc    # move a file off the default
+sedit --forget-default
+```
+
+- **Creating a file.** If a default exists and you are at a terminal, you are
+  asked whether the new file uses the default or a custom password. Without a
+  terminal (a script) and without a flag, a custom password is used, so the
+  default is never picked up by accident. `--default` fails if none is set.
+  `--passwd` and `--encrypt` work the same way for the new password.
+- **Opening a file.** `sedit` tries, in order: the file's own entry (from
+  `--remember`), the default, then a prompt. A file with a custom password just
+  fails the default attempt silently and prompts. That costs one extra key
+  derivation (roughly a third of a second with the current settings).
+- **The default is never removed automatically**, because many files rely on it.
+  Per-file entries still are (see above).
+- **Changing the default does not re-key your files.** Files created with the
+  previous default still need the previous password. `--set-default` reminds you
+  when it replaces an existing one.
+- **Files don't record which kind they are.** A sensitive file whose password
+  happens to equal the default will open silently, so give sensitive files a
+  different password and create them with `--custom`.
+
+The security trade-offs of the previous section apply, with a larger blast
+radius: any program running as you can read the default and it opens **every**
+file that uses it.
+
 ### Restoring the previous version
 
 ```sh
@@ -179,9 +221,10 @@ defend against malware or an attacker on your machine while the file is open.
 - **Converted plaintext isn't erased.** After `--encrypt`, the original plaintext
   may remain in freed disk blocks, backups, Time Machine snapshots or editor
   files. Treat the old contents as exposed, and rotate any credentials in it.
-- **Remembered passwords are readable by any process running as you.** See
-  [Remembering passwords](#remembering-passwords-macos-keychain). Only use
-  `--remember` where that is acceptable.
+- **Remembered and default passwords are readable by any process running as
+  you.** See [Remembering passwords](#remembering-passwords-macos-keychain) and
+  [Default password](#default-password-macos-keychain). A leaked default opens
+  every file that uses it. Only use these where that is acceptable.
 - **Single backup generation.** Only the immediately preceding version is kept.
 - **Lock file is advisory and local.** The lock is an `flock` on `.FILE.lock`,
   which is left on disk (empty) after exit. It is released automatically if

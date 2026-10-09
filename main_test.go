@@ -33,7 +33,7 @@ func TestEncryptConvertsPlaintext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "notes.txt")
 	os.WriteFile(path, []byte("my secret\n"), 0o600)
 	withStdin(t, "pw\n")
-	if err := encrypt(path, true); err != nil {
+	if err := encrypt(path, true, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
@@ -52,13 +52,13 @@ func TestEncryptRefusals(t *testing.T) {
 	already := filepath.Join(dir, "already")
 	enc, _ := Encrypt([]byte("pw"), []byte("x"), testKDF)
 	os.WriteFile(already, enc, 0o600)
-	if err := encrypt(already, true); err == nil || !strings.Contains(err.Error(), "already") {
+	if err := encrypt(already, true, choiceAsk); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Fatalf("want already-sedit error, got %v", err)
 	}
 
 	empty := filepath.Join(dir, "empty")
 	os.WriteFile(empty, nil, 0o600)
-	if err := encrypt(empty, true); err == nil || !strings.Contains(err.Error(), "empty") {
+	if err := encrypt(empty, true, choiceAsk); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("want empty error, got %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestEncryptRefusals(t *testing.T) {
 	plain := filepath.Join(dir, "plain")
 	os.WriteFile(plain, []byte("data"), 0o600)
 	withStdin(t, "pw\n")
-	if err := encrypt(plain, false); err == nil {
+	if err := encrypt(plain, false, choiceAsk); err == nil {
 		t.Fatal("expected refusal without -y on non-terminal")
 	}
 	if b, _ := os.ReadFile(plain); string(b) != "data" {
@@ -78,7 +78,7 @@ func TestEditRejectsPlaintextBeforePrompt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.txt")
 	os.WriteFile(path, []byte("not encrypted"), 0o600)
 	withStdin(t, "") // would fail with EOF if a password were requested
-	err := edit(path, false)
+	err := edit(path, false, choiceAsk)
 	if err == nil || !strings.Contains(err.Error(), "not a sedit file") {
 		t.Fatalf("got %v", err)
 	}
@@ -97,7 +97,7 @@ func TestEditTreatsEmptyFileAsNew(t *testing.T) {
 	path := filepath.Join(dir, "secrets")
 	os.WriteFile(path, nil, 0o600)
 	withStdin(t, "pw\n")
-	if err := edit(path, false); err != nil {
+	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
@@ -151,7 +151,7 @@ func TestRememberThenUseStoredPassword(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secrets")
 
 	withStdin(t, "pw\n")
-	if err := edit(path, true); err != nil {
+	if err := edit(path, true, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	acct, _ := account(path) // resolved only once the file exists
@@ -162,7 +162,7 @@ func TestRememberThenUseStoredPassword(t *testing.T) {
 	// No password on stdin: must come from the store.
 	appendEditor(t, "two")
 	withStdin(t, "")
-	if err := edit(path, false); err != nil {
+	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
@@ -176,7 +176,7 @@ func TestNothingStoredWithoutRemember(t *testing.T) {
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "secrets")
 	withStdin(t, "pw\n")
-	if err := edit(path, false); err != nil {
+	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	if len(fs.m) != 0 {
@@ -189,7 +189,7 @@ func TestStaleStoredPasswordIsRemoved(t *testing.T) {
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "secrets")
 	withStdin(t, "pw\n")
-	if err := edit(path, false); err != nil {
+	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	acct, _ := account(path)
@@ -197,7 +197,7 @@ func TestStaleStoredPasswordIsRemoved(t *testing.T) {
 
 	withStdin(t, "pw\n") // falls back to prompting
 	appendEditor(t, "two")
-	if err := edit(path, false); err != nil {
+	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := fs.m[acct]; ok {
@@ -210,13 +210,13 @@ func TestPasswdUpdatesStoredPassword(t *testing.T) {
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "secrets")
 	withStdin(t, "pw\n")
-	if err := edit(path, true); err != nil {
+	if err := edit(path, true, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	acct, _ := account(path)
 
 	withStdin(t, "newpw\n") // old password comes from the store
-	if err := passwd(path); err != nil {
+	if err := passwd(path, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
 	if string(fs.m[acct]) != "newpw" {
@@ -245,7 +245,7 @@ func TestRememberWithoutStore(t *testing.T) {
 	old := store
 	store = nil
 	defer func() { store = old }()
-	if err := edit("whatever", true); err == nil {
+	if err := edit("whatever", true, choiceAsk); err == nil {
 		t.Fatal("expected error")
 	}
 	if err := forget("whatever"); err == nil {

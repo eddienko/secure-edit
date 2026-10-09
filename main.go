@@ -15,16 +15,20 @@ import (
 )
 
 const usage = `usage:
-  sedit FILE              edit FILE (created if it doesn't exist or is empty)
+  sedit [--default|--custom] FILE
+                          edit FILE (created if it doesn't exist or is empty)
   sedit -p FILE           decrypt FILE to stdout
-  sedit --passwd FILE     change FILE's password
-  sedit --encrypt [-y] FILE
+  sedit [--default|--custom] --passwd FILE
+                          change FILE's password
+  sedit [--default|--custom] --encrypt [-y] FILE
                           encrypt an existing plaintext FILE in place
   sedit --remember FILE   edit FILE and save its password in the macOS Keychain
   sedit --forget FILE     remove FILE's password from the Keychain
+  sedit --set-default     store a default password in the macOS Keychain
+  sedit --forget-default  remove the default password
 
-If a password is stored for FILE it is used instead of prompting.
-
+--default/--custom choose the password for a new file without asking.
+A stored password (per file, then the default) is used instead of prompting.
 The editor is taken from $VISUAL, then $EDITOR, then vi.`
 
 func main() {
@@ -35,26 +39,31 @@ func main() {
 }
 
 func run(args []string) error {
-	switch {
-	case len(args) == 1 && !strings.HasPrefix(args[0], "-"):
-		return edit(args[0], false)
-	case len(args) == 2 && args[0] == "--remember":
-		return edit(args[1], true)
-	case len(args) == 2 && args[0] == "--forget":
-		return forget(args[1])
-	case len(args) == 2 && args[0] == "-p":
-		return print(args[1])
-	case len(args) == 2 && args[0] == "--passwd":
-		return passwd(args[1])
-	case len(args) == 2 && args[0] == "--encrypt":
-		return encrypt(args[1], false)
-	case len(args) == 3 && args[0] == "--encrypt" && args[1] == "-y":
-		return encrypt(args[2], true)
+	o, err := parseArgs(args)
+	if err != nil {
+		return err
 	}
-	return errors.New(usage)
+	switch o.mode {
+	case "edit":
+		return edit(o.file, false, o.choice)
+	case "remember":
+		return edit(o.file, true, o.choice)
+	case "print":
+		return print(o.file)
+	case "passwd":
+		return passwd(o.file, o.choice)
+	case "encrypt":
+		return encrypt(o.file, o.yes, o.choice)
+	case "forget":
+		return forget(o.file)
+	case "set-default":
+		return setDefault()
+	default: // forget-default
+		return forgetDefault()
+	}
 }
 
-func edit(path string, remember bool) (err error) {
+func edit(path string, remember bool, choice pwChoice) (err error) {
 	if remember && store == nil {
 		return errNoStore
 	}
@@ -70,7 +79,7 @@ func edit(path string, remember bool) (err error) {
 	case errors.Is(err, fs.ErrNotExist), err == nil && len(data) == 0:
 		// New or empty file: start fresh, and there's nothing to back up.
 		data = nil
-		if password, err = promptNew(); err != nil {
+		if password, err = newPassword(choice); err != nil {
 			return err
 		}
 	case err != nil:
@@ -116,8 +125,8 @@ func edit(path string, remember bool) (err error) {
 
 var errNoStore = errors.New("storing passwords isn't supported on this platform")
 
-// openExisting decrypts data, using the stored password if there is one and
-// falling back to prompting. A stored password that no longer works is removed.
+// openExisting decrypts data, using the file's stored password, then the default
+// password, then prompting. A stored password that no longer works is removed.
 func openExisting(path string, data []byte) (password, plain []byte, wasStored bool, err error) {
 	if store != nil {
 		if acct, aerr := account(path); aerr == nil {
@@ -137,6 +146,11 @@ func openExisting(path string, data []byte) (password, plain []byte, wasStored b
 				fmt.Fprintln(os.Stderr, "sedit: can't read stored password:", gerr)
 			}
 		}
+	}
+	if pw, pt, ok, derr := tryDefault(data); derr != nil {
+		return nil, nil, false, derr
+	} else if ok {
+		return pw, pt, false, nil
 	}
 	if password, err = prompt("Password: "); err != nil {
 		return nil, nil, false, err
@@ -184,7 +198,7 @@ func requireSedit(path string, data []byte) error {
 }
 
 // encrypt converts an existing plaintext file to a sedit file in place.
-func encrypt(path string, yes bool) error {
+func encrypt(path string, yes bool, choice pwChoice) error {
 	unlock, err := Lock(path)
 	if err != nil {
 		return err
@@ -207,7 +221,7 @@ func encrypt(path string, yes bool) error {
 			return err
 		}
 	}
-	password, err := promptNew()
+	password, err := newPassword(choice)
 	if err != nil {
 		return err
 	}
@@ -250,7 +264,7 @@ func print(path string) error {
 	return err
 }
 
-func passwd(path string) error {
+func passwd(path string, choice pwChoice) error {
 	unlock, err := Lock(path)
 	if err != nil {
 		return err
@@ -270,7 +284,7 @@ func passwd(path string) error {
 	}
 	defer wipe(old)
 	defer wipe(plain)
-	password, err := promptNew()
+	password, err := newPassword(choice)
 	if err != nil {
 		return err
 	}
