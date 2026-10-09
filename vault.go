@@ -56,6 +56,11 @@ func (p kdfParams) key(password, salt []byte) []byte {
 	return argon2.IDKey(password, salt, p.time, p.memory, p.threads, keyLen)
 }
 
+// IsSedit reports whether data starts with the sedit magic bytes.
+func IsSedit(data []byte) bool {
+	return bytes.HasPrefix(data, magic)
+}
+
 // Encrypt seals plaintext under password with a fresh salt and nonce.
 func Encrypt(password, plaintext []byte, p kdfParams) ([]byte, error) {
 	header := make([]byte, 0, headerLen)

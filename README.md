@@ -38,9 +38,10 @@ go build -o sedit .
 ## Usage
 
 ```
-sedit FILE           edit FILE (created if it doesn't exist)
-sedit -p FILE        decrypt FILE to stdout
-sedit --passwd FILE  change FILE's password
+sedit FILE                 edit FILE (created if it doesn't exist or is empty)
+sedit -p FILE              decrypt FILE to stdout
+sedit --passwd FILE        change FILE's password
+sedit --encrypt [-y] FILE  encrypt an existing plaintext FILE in place
 ```
 
 ```sh
@@ -51,6 +52,21 @@ sedit --passwd secrets.enc
 
 For a new file you are asked for the password twice. An empty password is
 rejected.
+
+### Converting an existing plaintext file
+
+`sedit` refuses to open a file that isn't a sedit file, and says so before asking
+for a password. This protects you from typos like `sedit .bashrc`. To encrypt an
+existing plaintext file deliberately:
+
+```sh
+sedit --encrypt notes.txt      # asks for confirmation, then a new password
+sedit --encrypt -y notes.txt   # skip the confirmation (required without a terminal)
+```
+
+It refuses files that are already encrypted or empty. An empty file needs no
+conversion: `sedit FILE` treats it as new. No `.bak` is created, because it would
+be a plaintext copy. See the limitations below about the old plaintext.
 
 ### Restoring the previous version
 
@@ -111,6 +127,9 @@ defend against malware or an attacker on your machine while the file is open.
 - **`FILE.bak` keeps the old password.** After `--passwd`, an existing `.bak` is
   still encrypted with the *old* password. `sedit` warns you but doesn't delete
   it. Remove it yourself if the old password was compromised.
+- **Converted plaintext isn't erased.** After `--encrypt`, the original plaintext
+  may remain in freed disk blocks, backups, Time Machine snapshots or editor
+  files. Treat the old contents as exposed, and rotate any credentials in it.
 - **Single backup generation.** Only the immediately preceding version is kept.
 - **Lock file is advisory and local.** The lock is an `flock` on `.FILE.lock`,
   which is left on disk (empty) after exit. It is released automatically if

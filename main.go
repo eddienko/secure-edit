@@ -15,9 +15,11 @@ import (
 )
 
 const usage = `usage:
-  sedit FILE           edit FILE (created if it doesn't exist)
-  sedit -p FILE        decrypt FILE to stdout
-  sedit --passwd FILE  change FILE's password
+  sedit FILE              edit FILE (created if it doesn't exist or is empty)
+  sedit -p FILE           decrypt FILE to stdout
+  sedit --passwd FILE     change FILE's password
+  sedit --encrypt [-y] FILE
+                          encrypt an existing plaintext FILE in place
 
 The editor is taken from $VISUAL, then $EDITOR, then vi.`
 
@@ -36,6 +38,10 @@ func run(args []string) error {
 		return print(args[1])
 	case len(args) == 2 && args[0] == "--passwd":
 		return passwd(args[1])
+	case len(args) == 2 && args[0] == "--encrypt":
+		return encrypt(args[1], false)
+	case len(args) == 3 && args[0] == "--encrypt" && args[1] == "-y":
+		return encrypt(args[2], true)
 	}
 	return errors.New(usage)
 }
@@ -50,13 +56,18 @@ func edit(path string) error {
 	data, err := os.ReadFile(path)
 	var password, plain []byte
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, fs.ErrNotExist), err == nil && len(data) == 0:
+		// New or empty file: start fresh, and there's nothing to back up.
+		data = nil
 		if password, err = promptNew(); err != nil {
 			return err
 		}
 	case err != nil:
 		return err
 	default:
+		if err := requireSedit(path, data); err != nil {
+			return err
+		}
 		if password, err = prompt("Password: "); err != nil {
 			return err
 		}
@@ -92,9 +103,69 @@ func edit(path string) error {
 
 func backupPath(path string) string { return path + ".bak" }
 
+// requireSedit fails early, before any password prompt, if data isn't a sedit file.
+func requireSedit(path string, data []byte) error {
+	if IsSedit(data) {
+		return nil
+	}
+	return fmt.Errorf("%s is not a sedit file (use \"sedit --encrypt %s\" to convert a plaintext file)", path, path)
+}
+
+// encrypt converts an existing plaintext file to a sedit file in place.
+func encrypt(path string, yes bool) error {
+	unlock, err := Lock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	plain, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	defer wipe(plain)
+	if IsSedit(plain) {
+		return fmt.Errorf("%s is already a sedit file", path)
+	}
+	if len(plain) == 0 {
+		return fmt.Errorf("%s is empty; just run \"sedit %s\"", path, path)
+	}
+	if !yes {
+		if err := confirm(fmt.Sprintf("Encrypt %s in place? The old plaintext can't be reliably erased from disk or backups. [y/N] ", path)); err != nil {
+			return err
+		}
+	}
+	password, err := promptNew()
+	if err != nil {
+		return err
+	}
+	defer wipe(password)
+	out, err := Encrypt(password, plain, defaultKDF)
+	if err != nil {
+		return err
+	}
+	// No .bak here: it would be a copy of the plaintext.
+	return writeAtomic(path, out)
+}
+
+func confirm(msg string) error {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return errors.New("not a terminal; pass -y to skip confirmation")
+	}
+	fmt.Fprint(os.Stderr, msg)
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		return errors.New("aborted")
+	}
+	return nil
+}
+
 func print(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return err
+	}
+	if err := requireSedit(path, data); err != nil {
 		return err
 	}
 	password, err := prompt("Password: ")
@@ -120,6 +191,9 @@ func passwd(path string) error {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		return err
+	}
+	if err := requireSedit(path, data); err != nil {
 		return err
 	}
 	old, err := prompt("Current password: ")
