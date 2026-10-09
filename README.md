@@ -1,8 +1,6 @@
-<p style="float: right">
-  <img src="logo.png" alt="secure-edit logo" width="220">
-</p>
-
 # secure-edit
+
+<img src="logo.png" align="right" width="200" alt="secure-edit logo">
 
 Edit a passphrase-encrypted text file with your normal editor, and share it
 safely with others.
@@ -14,6 +12,7 @@ a copy to their public key (age or SSH) that they can open with the standard
 `age` tool, and `sedit --import` turns a file sent to you back into one you can
 edit.
 
+<br clear="right">
 
 <p align="center">
   <img src="example.png" alt="secure-edit editor" width="800">
