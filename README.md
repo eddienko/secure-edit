@@ -1,8 +1,12 @@
-# sedit
+<p style="float: right">
+  <img src="logo.png" alt="secure-edit logo" width="220">
+</p>
+
+# secure-edit
 
 Edit a passphrase-encrypted text file with your normal editor.
 
-`sedit` is a stronger take on `vim -x`: it uses authenticated encryption, so a
+secure-edit a.k.a.`sedit` is a stronger take on `vim -x`: it uses authenticated encryption, so a
 wrong password is rejected **before** the editor opens, and any tampering with
 the file is detected.
 
