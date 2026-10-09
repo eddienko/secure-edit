@@ -25,6 +25,8 @@ const usage = `usage:
                           write a copy of FILE for others to decrypt with "age"
   sedit [--default|--custom] --import FILE.age [-i KEY]... [-o OUT]
                           turn an age-encrypted FILE.age into a sedit file
+  sedit --keygen -o FILE [--pq]
+                          create an age key pair, for receiving shared files
   sedit --remember FILE   edit FILE and save its password in the macOS Keychain
   sedit --forget FILE     remove FILE's password from the Keychain
   sedit --set-default     store a default password in the macOS Keychain
@@ -38,6 +40,8 @@ FILE.age ("-" is stdout) and -a writes ASCII armor. Recipients decrypt it with
 "age -d -i KEY" and don't need sedit. --import is the reverse: -i names your
 age or SSH private key (omit it for a passphrase-encrypted file); OUT defaults
 to FILE.age without the .age, and an existing file is never overwritten.
+--keygen writes a new private key to FILE (mode 0600, never overwriting) and
+prints the public key to give to senders.
 A stored password (per file, then the default) is used instead of prompting.
 A symlink is followed: the file it points to is edited, locked and backed up.
 The editor is taken from $SEDIT_EDITOR, then $VISUAL, then $EDITOR, then vim or vi.
@@ -84,6 +88,8 @@ func run(args []string) error {
 		return encrypt(o.file, o.yes, o.choice)
 	case "forget":
 		return forget(o.file)
+	case "keygen":
+		return keygen(o.out, o.pq)
 	case "import":
 		return importFile(o.file, o.identities, o.out, o.choice)
 	case "share":

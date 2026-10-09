@@ -239,6 +239,9 @@ func TestParseArgs(t *testing.T) {
 		"--import f.age -i a -i b -o out": {mode: "import", file: "f.age", identities: []string{"a", "b"}, out: "out"},
 		"--default --import f.age":        {mode: "import", file: "f.age", choice: choiceDefault},
 		"-i k --import f.age":             {mode: "import", file: "f.age", identities: []string{"k"}},
+		"--keygen -o k":                   {mode: "keygen", out: "k"},
+		"--keygen -o - --pq":              {mode: "keygen", out: "-", pq: true},
+		"--pq -o k --keygen":              {mode: "keygen", out: "k", pq: true},
 	}
 	for in, want := range good {
 		got, err := parseArgs(strings.Fields(in))
@@ -250,7 +253,8 @@ func TestParseArgs(t *testing.T) {
 		"-y f", "-p --default f", "--set-default f", "--forget-default f", "--forget --custom f",
 		"--share f", "--share", "--share f --to", "--share f --to k -o", "--share f --to k -o a -o b",
 		"-i k f", "--import f -i", "--import f --to k", "--import f -a", "--import f -y", "--import f -o a -o b",
-		"--share f --to k -i k2", "-o x f", "-a f", "-R r f", "--share f --to k --default f2"} {
+		"--share f --to k -i k2", "--keygen", "--keygen f -o k", "--keygen -o k -y", "--keygen -o k --default",
+		"--keygen -o k -i x", "--keygen -o k --to a", "--pq f", "--share f --to k --pq", "-o x f", "-a f", "-R r f", "--share f --to k --default f2"} {
 		if _, err := parseArgs(strings.Fields(in)); err == nil {
 			t.Errorf("%q should be rejected", in)
 		}

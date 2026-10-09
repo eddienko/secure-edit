@@ -6,7 +6,7 @@ import (
 )
 
 type opts struct {
-	mode   string // edit, print, passwd, encrypt, remember, forget, share, import, set-default, forget-default
+	mode   string // edit, print, passwd, encrypt, remember, forget, share, import, keygen, set-default, forget-default
 	file   string
 	yes    bool
 	choice pwChoice
@@ -19,6 +19,9 @@ type opts struct {
 
 	// --import
 	identities []string // -i KEY
+
+	// --keygen
+	pq bool // --pq
 }
 
 var modeFlags = map[string]string{
@@ -29,6 +32,7 @@ var modeFlags = map[string]string{
 	"--forget":         "forget",
 	"--share":          "share",
 	"--import":         "import",
+	"--keygen":         "keygen",
 	"--set-default":    "set-default",
 	"--forget-default": "forget-default",
 }
@@ -56,13 +60,15 @@ func parseArgs(args []string) (opts, error) {
 			return opts{mode: "version"}, nil
 		case modeFlags[a] != "":
 			if modeSet {
-				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --import, --set-default, --forget-default may be given")
+				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --import, --keygen, --set-default, --forget-default may be given")
 			}
 			o.mode, modeSet = modeFlags[a], true
 		case a == "-y":
 			o.yes = true
 		case a == "-a" || a == "--armor":
 			o.armor = true
+		case a == "--pq":
+			o.pq = true
 		case a == "--to" || a == "-R" || a == "-o" || a == "-i":
 			v, ok := value(i)
 			if !ok {
@@ -100,7 +106,7 @@ func parseArgs(args []string) (opts, error) {
 		}
 	}
 
-	needsFile := o.mode != "set-default" && o.mode != "forget-default"
+	needsFile := o.mode != "set-default" && o.mode != "forget-default" && o.mode != "keygen"
 	switch {
 	case needsFile && o.file == "":
 		return bad("missing FILE")
@@ -112,8 +118,12 @@ func parseArgs(args []string) (opts, error) {
 		return bad("--share needs at least one recipient (--to KEY or -R FILE)")
 	case o.mode != "share" && (len(o.to) > 0 || len(o.recipFiles) > 0 || o.armor):
 		return bad("--to, -R and -a only apply to --share")
-	case o.mode != "share" && o.mode != "import" && o.out != "":
-		return bad("-o only applies to --share and --import")
+	case o.mode == "keygen" && o.out == "":
+		return bad("--keygen needs -o FILE for the private key (-o - prints it to stdout)")
+	case o.pq && o.mode != "keygen":
+		return bad("--pq only applies to --keygen")
+	case o.mode != "share" && o.mode != "import" && o.mode != "keygen" && o.out != "":
+		return bad("-o only applies to --share, --import and --keygen")
 	case o.mode != "import" && len(o.identities) > 0:
 		return bad("-i only applies to --import")
 	case choiceSet && o.mode != "edit" && o.mode != "remember" && o.mode != "passwd" && o.mode != "encrypt" && o.mode != "import":

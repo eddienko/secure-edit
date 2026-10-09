@@ -44,7 +44,8 @@ the file is detected.
   exits with an error, or you make no changes, the file is left untouched.
 - **Sharing:** `sedit --share` writes a copy encrypted to someone's age or SSH
   public key, which they can read with the standard `age` tool and no `sedit`.
-  `sedit --import` turns such a file (or any age file) into a `sedit` file.
+  `sedit --import` turns such a file (or any age file) into a `sedit` file, and
+  `sedit --keygen` creates the key pair you need to receive one.
 - **Previous version kept:** each save keeps the old version, still encrypted,
   as `FILE.bak`.
 - **Optional Keychain support (macOS, opt-in):** remember a file's password in
@@ -104,6 +105,7 @@ sedit --passwd FILE             change FILE's password
 sedit --encrypt [-y] FILE       encrypt an existing plaintext FILE in place
 sedit --share FILE --to KEY     write a copy of FILE for someone else (see below)
 sedit --import FILE.age -i KEY  turn an age-encrypted file into a sedit file
+sedit --keygen -o FILE          create an age key pair for receiving shared files
 sedit --remember FILE           edit FILE and save its password in the macOS Keychain
 sedit --forget FILE             remove FILE's password from the Keychain
 sedit --set-default             store a default password in the macOS Keychain
@@ -237,6 +239,38 @@ Things to know:
 - After sharing, the recipient's copy is only as private as their key and their
   machine. The copy decrypts to plain text on their side.
 
+### Generating a key
+
+To receive files shared with `--share`, or any age-encrypted file, you need a key
+pair. `sedit` can make one, so nothing else has to be installed:
+
+```sh
+sedit --keygen -o ~/.config/sedit/key.txt
+```
+
+```
+Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
+sedit: private key saved to /Users/you/.config/sedit/key.txt (keep it secret)
+```
+
+- **Give the public key** (`age1...`) to the people who want to send you files.
+  It isn't secret. If you lose track of it, it is also in the `# public key:` line
+  of the key file.
+- **Keep the key file private.** Anyone who has it can read every file that was
+  encrypted to you. It is created with mode `0600`. The key is not passphrase
+  protected, so treat the file like an SSH private key and keep it out of
+  repositories and cloud-synced folders unless you accept that.
+- **`-o FILE` is required**, so a private key never lands in the current
+  directory (possibly a git repository) by accident. The directory must already
+  exist. An existing file, or a symlink, is never overwritten. `-o -` prints the
+  key to stdout instead.
+- **`--pq`** makes a post-quantum hybrid key (`age1pq1...`). Anyone sending to it
+  must use only post-quantum recipients (see the sharing notes).
+- The file has the same format as the one `age-keygen` writes, so the standard
+  `age` tools can use it too, for example `age -d -i key.txt file.age`.
+- You can also skip this and use an SSH key you already have. Its public key
+  (`~/.ssh/id_ed25519.pub`) works as a recipient.
+
 ### Importing a shared file
 
 The other direction: if someone sent you a file encrypted with age (for example
@@ -254,7 +288,7 @@ It decrypts in memory and asks you for the new password (or use `--default` or
 
 | Option | Meaning |
 |--------|---------|
-| `-i KEY` | Your private key: an age key file (`AGE-SECRET-KEY-...` or a post-quantum `AGE-SECRET-KEY-PQ-...`) or an SSH private key. May be repeated. A passphrase-protected SSH key is fine: you are asked for its passphrase, but only if the file is actually addressed to that key. |
+| `-i KEY` | Your private key (see [Generating a key](#generating-a-key)): an age key file (`AGE-SECRET-KEY-...` or a post-quantum `AGE-SECRET-KEY-PQ-...`) or an SSH private key. May be repeated. A passphrase-protected SSH key is fine: you are asked for its passphrase, but only if the file is actually addressed to that key. |
 | *(no `-i`)* | The file must be passphrase-encrypted (`age -p`); you are asked for the passphrase. |
 | `-o OUT` | Where to write the `sedit` file. Default: the input name without `.age`. If the input doesn't end in `.age`, `-o` is required. |
 
