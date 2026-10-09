@@ -4,11 +4,15 @@
 
 # secure-edit
 
-Edit a passphrase-encrypted text file with your normal editor.
+Edit a passphrase-encrypted text file with your normal editor, and share it
+safely with others.
 
-secure-edit a.k.a.`sedit` is a stronger take on `vim -x`: it uses authenticated encryption, so a
-wrong password is rejected **before** the editor opens, and any tampering with
-the file is detected.
+`secure-edit` a.k.a. `sedit` uses authenticated encryption, so a wrong password
+is rejected **before** the editor opens, and any tampering with the file is
+detected. When you need to hand a file to someone else, `sedit --share` encrypts
+a copy to their public key (age or SSH) that they can open with the standard
+`age` tool, and `sedit --import` turns a file sent to you back into one you can
+edit.
 
 
 <p align="center">
