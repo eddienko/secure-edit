@@ -235,75 +235,91 @@ func runVim(t *testing.T, name string, ex ...string) string {
 	return string(b)
 }
 
-func TestVimStatusLine(t *testing.T) {
+func TestVimBanner(t *testing.T) {
 	for _, name := range []string{"notes.md", "my file.txt", "it's.txt", "50%.txt", `a|b.txt`, `a"b.txt`, `back\slash.txt`} {
 		out := runVim(t, name,
-			"call writefile([&statusline, &laststatus, hlexists('SeditBanner') ? 'hl' : 'nohl'], expand('%:h') . '/out')")
-		want := "%#SeditBanner# SEDIT ENCRYPTED %* " + titleEscape(name) + "%m%r%=%l,%c  %P \n2\nhl\n"
-		if out != want {
-			t.Errorf("%q: got %q, want %q", name, out, want)
+			"call writefile([&statusline, &laststatus, &showtabline, &fillchars, hlexists('SeditBanner') ? 'hl' : 'nohl'], expand('%:h') . '/out')")
+		lines := strings.Split(out, "\n")
+		if want := "%#SeditBanner# SEDIT ENCRYPTED %* " + titleEscape(name) + "%m%r%=%l,%c  %P "; lines[0] != want {
+			t.Errorf("%q: statusline got %q, want %q", name, lines[0], want)
+		}
+		if lines[1] != "2" {
+			t.Errorf("%q: laststatus = %q", name, lines[1])
+		}
+		// Everything else about the display is the user's own.
+		if lines[2] != "1" {
+			t.Errorf("%q: showtabline = %q, sedit must not touch the tab line", name, lines[2])
+		}
+		if !strings.Contains(lines[3], "eob:~") || strings.Contains(lines[3], "·") {
+			t.Errorf("%q: fillchars %q, sedit must leave vim's default end-of-buffer filler alone", name, lines[3])
+		}
+		if lines[4] != "hl" {
+			t.Errorf("%q: highlight missing", name)
 		}
 	}
 }
 
-// A status line plugin or a colorscheme must not be able to remove the banner.
-func TestVimStatusLineSurvivesOverrides(t *testing.T) {
+// Plugins and colorschemes must not be able to remove the banner.
+func TestVimBannerSurvivesOverrides(t *testing.T) {
 	out := runVim(t, "notes.md",
-		"set statusline=PLUGIN",
+		"set statusline=PLUGIN laststatus=0",
 		"doautocmd WinEnter",
-		"let a = &statusline",
+		"let a = [&statusline, &laststatus]",
 		"colorscheme default",
-		"let b = synIDattr(hlID('SeditBanner'), 'bg', 'cterm')",
-		"call writefile([a, b], expand('%:h') . '/out')")
+		"let b = [synIDattr(hlID('SeditBanner'), 'bg', 'cterm'), synIDattr(hlID('SeditMark'), 'fg', 'cterm')]",
+		"call writefile(a + b, expand('%:h') . '/out')")
 	lines := strings.Split(out, "\n")
 	if !strings.Contains(lines[0], "SEDIT ENCRYPTED") {
-		t.Errorf("plugin overrode the banner: %q", lines[0])
+		t.Errorf("status line overridden: %q", lines[0])
 	}
-	if lines[1] != "24" {
-		t.Errorf("highlight lost after colorscheme change: %q", lines[1])
+	if lines[1] != "2" {
+		t.Errorf("laststatus=%q", lines[1])
 	}
-}
-
-func TestStatuslineEnabled(t *testing.T) {
-	for val, want := range map[string]bool{
-		"": true, "1": true, "yes": true, "on": true, "anything": true,
-		"0": false, "false": false, "FALSE": false, "no": false, "Off": false, " 0 ": false,
-	} {
-		t.Setenv("SEDIT_STATUSLINE", val)
-		if got := statuslineEnabled(); got != want {
-			t.Errorf("SEDIT_STATUSLINE=%q: got %v, want %v", val, got, want)
-		}
+	// After the colorscheme change the banner and watermark colours are back.
+	if lines[2] != "24" || lines[3] != "33" {
+		t.Errorf("highlights after colorscheme: banner bg=%q watermark fg=%q", lines[2], lines[3])
 	}
 }
 
-// With SEDIT_STATUSLINE=0 no vim script is written and -S isn't passed.
-func TestStatuslineOptOut(t *testing.T) {
-	useFakeStore(t)
-	for _, tc := range []struct {
-		env     string
-		wantVim bool
-	}{{"", true}, {"0", false}} {
-		dir := t.TempDir()
-		seen := filepath.Join(dir, "seen")
-		script := filepath.Join(dir, "ed.sh")
-		os.WriteFile(script, []byte("#!/bin/sh\nls \"$(dirname \"$1\")\" > "+seen+"\necho x >> \"$1\"\n"), 0o755)
-		t.Setenv("EDITOR", script)
-		t.Setenv("VISUAL", "")
-		t.Setenv("SEDIT_STATUSLINE", tc.env)
-
-		withStdin(t, "pw\n")
-		if err := edit(filepath.Join(dir, "notes.md"), false, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-		b, _ := os.ReadFile(seen)
-		if got := strings.Contains(string(b), "sedit.vim"); got != tc.wantVim {
-			t.Errorf("SEDIT_STATUSLINE=%q: vim script present = %v, want %v (dir: %q)", tc.env, got, tc.wantVim, b)
-		}
+func TestVimWatermark(t *testing.T) {
+	out := runVim(t, "notes.md",
+		"let All = {-> prop_list(1, {'end_lnum': line('$')})}",
+		"let a = [len(All()), All()[0].lnum, All()[0].type, &modified]",
+		// Inserting a line above, or deleting line 1, moves or loses the mark;
+		// after TextChanged there must be exactly one, on line 1.
+		"execute 'normal! ggOnew'",
+		"doautocmd TextChanged",
+		"let b = [len(All()), All()[0].lnum]",
+		"execute 'normal! ggdd'",
+		"doautocmd TextChanged",
+		"let c = [len(All()), All()[0].lnum]",
+		"call writefile(map(a + b + c, 'string(v:val)'), expand('%:h') . '/out')")
+	got := strings.Join(strings.Split(strings.TrimSpace(out), "\n"), " ")
+	// a: 1 mark on line 1, type, not modified by the mark itself.
+	// b, c: still exactly one mark, on line 1.
+	want := `1 1 'sedit_mark' 0 1 1 1 1`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
+}
 
-	t.Setenv("EDITOR", "vim")
-	t.Setenv("SEDIT_STATUSLINE", "0")
-	if got := strings.Join(editorCmd("notes.md", ""), " "); strings.Contains(got, "-S") || !strings.Contains(got, "titlestring") {
-		t.Errorf("opt-out args: %q", got)
+// The watermark is virtual text: it must never end up in the file.
+func TestVimWatermarkNotWritten(t *testing.T) {
+	vim, err := exec.LookPath("vim")
+	if err != nil {
+		t.Skip("vim not installed")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "sedit.vim")
+	os.WriteFile(script, []byte(vimScript("notes.md")), 0o600)
+	file := filepath.Join(dir, "plain.txt")
+	os.WriteFile(file, []byte("hello\n"), 0o600)
+	args := append([]string{"-es", "-u", "NONE"}, vimArgs("notes.md", script)...)
+	args = append(args, "-c", "execute 'normal! Aworld' | write | qa!", file)
+	if b, err := exec.Command(vim, args...).CombinedOutput(); err != nil {
+		t.Fatalf("vim failed: %v\n%s", err, b)
+	}
+	if b, _ := os.ReadFile(file); string(b) != "helloworld\n" {
+		t.Errorf("file contains %q", b)
 	}
 }
