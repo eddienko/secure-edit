@@ -20,7 +20,13 @@ the file is detected.
   authenticated.
 - **Your editor:** uses `$VISUAL`, then `$EDITOR`, then `vi`. For vi, vim and
   nvim it disables swap, backup, undo and viminfo files so plaintext isn't
-  leaked.
+  leaked, and sets the terminal title to `sedit: FILE` so you can tell you are in
+  a sedit session. The editor is given a temp file named after your real file, so
+  it shows the right name and picks the right syntax highlighting.
+- **Clear confirmation:** when the editor exits, `sedit` says what happened, for
+  example `sedit: saved notes.txt (encrypted; password from Keychain)`, so you
+  know the file was encrypted and where the password came from. Messages go to
+  stderr, so `sedit -p FILE | ...` output is unaffected.
 - **Safe saves:** written atomically (temp file, fsync, rename). If the editor
   exits with an error, or you make no changes, the file is left untouched.
 - **Previous version kept:** each save keeps the old version, still encrypted,

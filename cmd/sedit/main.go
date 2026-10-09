@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -91,6 +90,7 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 
 	data, err := os.ReadFile(path)
 	var password, plain []byte
+	src := srcPrompt
 	switch {
 	case errors.Is(err, fs.ErrNotExist), err == nil && len(data) == 0:
 		// New or empty file: start fresh, and there's nothing to back up.
@@ -105,7 +105,7 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 			return err
 		}
 		// Fail before launching the editor if the password is wrong.
-		if password, plain, _, err = openExisting(path, data); err != nil {
+		if password, plain, src, err = openExisting(path, data); err != nil {
 			return err
 		}
 	}
@@ -113,17 +113,19 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 	defer wipe(plain)
 	defer func() {
 		if err == nil && remember {
-			err = storePassword(path, password)
+			if err = storePassword(path, password); err == nil {
+				fmt.Fprintln(os.Stderr, "sedit: password remembered in Keychain")
+			}
 		}
 	}()
 
-	edited, err := runEditor(plain)
+	edited, err := runEditor(path, plain)
 	if err != nil {
 		return err
 	}
 	defer wipe(edited)
 	if data != nil && bytes.Equal(plain, edited) {
-		fmt.Fprintln(os.Stderr, "no changes")
+		fmt.Fprintf(os.Stderr, "sedit: no changes to %s\n", path)
 		return nil
 	}
 	out, err := Encrypt(password, edited, defaultKDF)
@@ -136,25 +138,63 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 			return fmt.Errorf("writing backup: %w", err)
 		}
 	}
-	return writeAtomic(path, out)
+	if err := writeAtomic(path, out); err != nil {
+		return err
+	}
+	verb := "saved"
+	if data == nil {
+		verb = "created"
+	}
+	report(verb, path, src)
+	return nil
 }
 
 var errNoStore = errors.New("storing passwords isn't supported on this platform")
 
+// pwSource says where the password used to open a file came from.
+type pwSource int
+
+const (
+	srcPrompt  pwSource = iota // typed by the user
+	srcFile                    // the file's own Keychain entry
+	srcDefault                 // the shared default password
+)
+
+// note describes the source for the user, or "" if it's unremarkable.
+func (s pwSource) note() string {
+	switch s {
+	case srcFile:
+		return "password from Keychain"
+	case srcDefault:
+		return "default password from Keychain"
+	}
+	return ""
+}
+
+// report tells the user what happened to path, e.g.
+// "sedit: saved notes.txt (encrypted; password from Keychain)".
+func report(verb, path string, src pwSource) {
+	detail := "encrypted"
+	if n := src.note(); n != "" {
+		detail += "; " + n
+	}
+	fmt.Fprintf(os.Stderr, "sedit: %s %s (%s)\n", verb, path, detail)
+}
+
 // openExisting decrypts data, using the file's stored password, then the default
 // password, then prompting. A stored password that no longer works is removed.
-func openExisting(path string, data []byte) (password, plain []byte, wasStored bool, err error) {
+func openExisting(path string, data []byte) (password, plain []byte, src pwSource, err error) {
 	if store != nil {
 		if acct, aerr := account(path); aerr == nil {
 			pw, gerr := store.Get(acct)
 			switch {
 			case gerr == nil:
 				if plain, err = Decrypt(pw, data); err == nil {
-					return pw, plain, true, nil
+					return pw, plain, srcFile, nil
 				}
 				wipe(pw)
 				if !errors.Is(err, ErrBadPassword) {
-					return nil, nil, false, err
+					return nil, nil, srcPrompt, err
 				}
 				store.Delete(acct)
 				fmt.Fprintln(os.Stderr, "sedit: stored password no longer works; removed it")
@@ -164,18 +204,18 @@ func openExisting(path string, data []byte) (password, plain []byte, wasStored b
 		}
 	}
 	if pw, pt, ok, derr := tryDefault(data); derr != nil {
-		return nil, nil, false, derr
+		return nil, nil, srcPrompt, derr
 	} else if ok {
-		return pw, pt, false, nil
+		return pw, pt, srcDefault, nil
 	}
 	if password, err = prompt("Password: "); err != nil {
-		return nil, nil, false, err
+		return nil, nil, srcPrompt, err
 	}
 	if plain, err = Decrypt(password, data); err != nil {
 		wipe(password)
-		return nil, nil, false, err
+		return nil, nil, srcPrompt, err
 	}
-	return password, plain, false, nil
+	return password, plain, srcPrompt, nil
 }
 
 func storePassword(path string, password []byte) error {
@@ -247,7 +287,11 @@ func encrypt(path string, yes bool, choice pwChoice) error {
 		return err
 	}
 	// No .bak here: it would be a copy of the plaintext.
-	return writeAtomic(path, out)
+	if err := writeAtomic(path, out); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "sedit: encrypted %s\n", path)
+	return nil
 }
 
 func confirm(msg string) error {
@@ -294,7 +338,7 @@ func passwd(path string, choice pwChoice) error {
 	if err := requireSedit(path, data); err != nil {
 		return err
 	}
-	old, plain, wasStored, err := openExisting(path, data)
+	old, plain, src, err := openExisting(path, data)
 	if err != nil {
 		return err
 	}
@@ -315,66 +359,13 @@ func passwd(path string, choice pwChoice) error {
 	if err := writeAtomic(path, out); err != nil {
 		return err
 	}
-	if wasStored {
+	if src == srcFile {
 		if err := storePassword(path, password); err != nil {
 			return fmt.Errorf("password changed, but updating the stored one failed (run \"sedit --forget %s\"): %w", path, err)
 		}
 	}
+	fmt.Fprintf(os.Stderr, "sedit: password changed for %s\n", path)
 	return nil
-}
-
-// runEditor writes plain to a private temp file, runs the editor on it, and
-// returns the resulting contents. The temp file is zeroed and removed after.
-func runEditor(plain []byte) (edited []byte, err error) {
-	dir, err := os.MkdirTemp("", "sedit-") // mode 0700
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	tmp := filepath.Join(dir, "secret.txt")
-	defer shred(tmp)
-
-	if err := os.WriteFile(tmp, plain, 0o600); err != nil {
-		return nil, err
-	}
-	argv := editorCmd()
-	argv = append(argv, tmp)
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("editor failed, file not changed: %w", err)
-	}
-	return os.ReadFile(tmp)
-}
-
-// editorCmd returns the editor command line, with flags that stop vim-family
-// editors from leaking plaintext into swap, backup, undo and viminfo files.
-func editorCmd() []string {
-	ed := os.Getenv("VISUAL")
-	if ed == "" {
-		ed = os.Getenv("EDITOR")
-	}
-	if ed == "" {
-		ed = "vi"
-	}
-	argv := strings.Fields(ed)
-	switch filepath.Base(argv[0]) {
-	case "vi", "vim", "nvim", "view":
-		argv = append(argv, "-n", "-i", "NONE",
-			"-c", "set nobackup nowritebackup noundofile noswapfile viminfo=")
-	}
-	return argv
-}
-
-func shred(path string) {
-	if st, err := os.Stat(path); err == nil {
-		if f, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
-			f.Write(make([]byte, st.Size()))
-			f.Sync()
-			f.Close()
-		}
-	}
-	os.Remove(path)
 }
 
 // writeAtomic writes data next to path and renames it into place.
