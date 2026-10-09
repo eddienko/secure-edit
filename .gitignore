@@ -8,3 +8,6 @@
 
 # scratch files from manual testing
 test*.txt
+
+# release build output
+/dist/

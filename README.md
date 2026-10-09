@@ -30,6 +30,27 @@ the file is detected.
 
 ## Install
 
+### From a release
+
+Download the tarball for your platform (macOS or Linux, arm64 or amd64) from the
+[Releases page](https://github.com/eddienko/secure-edit/releases), check it
+against `SHA256SUMS`, and put `sedit` somewhere on your `PATH`:
+
+```sh
+shasum -a 256 -c --ignore-missing SHA256SUMS
+tar -xzf sedit_v1.0.0_darwin_arm64.tar.gz
+mv sedit_v1.0.0_darwin_arm64/sedit /usr/local/bin/
+sedit --version
+```
+
+The binaries are not code-signed or notarized. If macOS refuses to open one
+downloaded in a browser ("cannot be opened because the developer cannot be
+verified"), clear the quarantine flag with `xattr -d com.apple.quarantine sedit`,
+or build from source instead. Releases are built by a GitHub Actions workflow
+when a `v*` tag is pushed.
+
+### From source
+
 Requires Go 1.26 or newer (an older Go with `GOTOOLCHAIN=auto`, the default,
 downloads it automatically).
 
