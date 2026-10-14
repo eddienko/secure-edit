@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"golang.org/x/term"
 )
 
 // defaultAccount is the store key for the shared default password. It can't
@@ -50,10 +48,11 @@ func newPassword(choice pwChoice) ([]byte, error) {
 	// never picked up by accident.
 	pw, err := getDefault()
 	wipe(pw)
-	if err != nil || !term.IsTerminal(int(os.Stdin.Fd())) {
+	tty, ok := promptTerminal()
+	if err != nil || !ok {
 		return promptNew()
 	}
-	in := bufio.NewReader(os.Stdin)
+	in := bufio.NewReader(tty)
 	for {
 		fmt.Fprint(os.Stderr, "Password: [d]efault or [c]ustom? ")
 		line, err := in.ReadString('\n')

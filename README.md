@@ -45,6 +45,8 @@ edit.
   stderr, so `sedit -p FILE | ...` output is unaffected.
 - **Safe saves:** written atomically (temp file, fsync, rename). If the editor
   exits with an error, or you make no changes, the file is left untouched.
+- **Piping:** `echo text | sedit --write FILE` stores piped data, and `--append`
+  adds to a file, with no editor.
 - **Sharing:** `sedit --share` writes a copy encrypted to someone's age or SSH
   public key, which they can read with the standard `age` tool and no `sedit`.
   `sedit --import` turns such a file (or any age file) into a `sedit` file, and
@@ -104,6 +106,8 @@ go build -o sedit ./cmd/sedit
 ```
 sedit FILE                      edit FILE (created if it doesn't exist or is empty)
 sedit -p FILE                   decrypt FILE to stdout
+sedit --write FILE              make FILE's contents whatever is piped in on stdin
+sedit --append FILE             add whatever is piped in to the end of FILE
 sedit --passwd FILE             change FILE's password
 sedit --encrypt [-y] FILE       encrypt an existing plaintext FILE in place
 sedit --share FILE --to KEY     write a copy of FILE for someone else (see below)
@@ -179,6 +183,44 @@ nvim get the leak protections described above.
 
 To make the opt-out permanent, put `export SEDIT_STATUSLINE=0` in your shell
 profile. Anything else, or leaving it unset, keeps the banner.
+
+### Piping data in
+
+`--write` and `--append` take the data from stdin, with no editor involved:
+
+```sh
+echo "my secret" | sedit --write secret.txt          # replace the contents, like  >
+echo "api key: abc123" | sedit --append secret.txt   # add to the end, like  >>
+pbpaste | sedit --write notes.txt
+sedit -p old.txt | tr a-z A-Z | sedit --write new.txt
+```
+
+The file is created if it doesn't exist. Because stdin carries the data, the
+password can't come from stdin as well:
+
+- **Existing files:** the password comes from the Keychain (the file's own
+  entry, then the default password) or, failing that, `sedit` asks for it on the
+  terminal itself (`/dev/tty`), so it works in the middle of a pipeline.
+- **New files:** you are asked for a new password, twice, on the terminal. Use
+  `--default` or `--custom` to choose without being asked.
+- **No terminal at all** (a cron job, for example) and no stored password: it
+  stops with a message instead of hanging. Store the password with `--remember`,
+  or set a default one with `--set-default`, and it works unattended.
+
+Things to know:
+
+- **The data is stored exactly as it arrives.** Nothing is added, so `echo` adds a
+  newline and `printf 'x'` doesn't. `--append` doesn't insert a line break
+  either, so a file that doesn't end in a newline gets the new text glued on.
+- **Empty input is refused.** If the command before the pipe fails and sends
+  nothing, `--write` won't replace your file with nothing.
+- Every change keeps the previous version as `FILE.bak`, as an edit does.
+- **Piping into a plain `sedit FILE` does not store the data.** There stdin is
+  read as the password (see Scripting below), so `echo "my secret" | sedit FILE`
+  would make `my secret` the password of a new, empty file. `sedit` warns about
+  this when it happens; use `--write` instead.
+- `--write` refuses to run when stdin is a terminal, and input is limited to
+  256 MiB.
 
 ### Converting an existing plaintext file
 
@@ -430,7 +472,8 @@ Only one previous version is kept; each save overwrites `FILE.bak`.
 ### Scripting
 
 When stdin is not a terminal, passwords are read as lines from stdin, one per
-prompt:
+prompt (except with `--write` and `--append`, where stdin carries the data; see
+[Piping data in](#piping-data-in)):
 
 ```sh
 echo "$PASSWORD" | sedit -p secrets.enc

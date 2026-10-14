@@ -477,7 +477,7 @@ func TestFastExitWithChangesDoesNotWarn(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if strings.Contains(out, "warning") {
-		t.Errorf("unexpected warning: %q", out)
+	if strings.Contains(out, "the editor exited") {
+		t.Errorf("unexpected fast-exit warning: %q", out)
 	}
 }

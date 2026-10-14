@@ -21,6 +21,10 @@ const usage = `usage:
                           change FILE's password
   sedit [--default|--custom] --encrypt [-y] FILE
                           encrypt an existing plaintext FILE in place
+  sedit [--default|--custom] --write FILE
+                          make FILE's contents whatever is piped in on stdin
+  sedit [--default|--custom] --append FILE
+                          add whatever is piped in to the end of FILE
   sedit --share FILE (--to KEY | -R FILE)... [-o OUT] [-a]
                           write a copy of FILE for others to decrypt with "age"
   sedit [--default|--custom] --import FILE.age [-i KEY]... [-o OUT]
@@ -35,6 +39,8 @@ const usage = `usage:
   sedit --version         show the version
 
 --default/--custom choose the password for a new file without asking.
+--write and --append take the data from stdin and ask for the password on the
+terminal (or use the Keychain); they never overwrite a file with empty input.
 --share encrypts a copy to age (age1...) or SSH public keys; OUT defaults to
 FILE.age ("-" is stdout) and -a writes ASCII armor. Recipients decrypt it with
 "age -d -i KEY" and don't need sedit. --import is the reverse: -i names your
@@ -88,6 +94,10 @@ func run(args []string) error {
 		return encrypt(o.file, o.yes, o.choice)
 	case "forget":
 		return forget(o.file)
+	case "write":
+		return writeStdin(o.file, false, o.choice)
+	case "append":
+		return writeStdin(o.file, true, o.choice)
 	case "keygen":
 		return keygen(o.out, o.pq)
 	case "import":
@@ -122,8 +132,13 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 	case errors.Is(err, fs.ErrNotExist), err == nil && len(data) == 0:
 		// New or empty file: start fresh, and there's nothing to back up.
 		data = nil
+		stdinUsedForPassword = false
 		if password, err = newPassword(choice); err != nil {
 			return err
+		}
+		if stdinUsedForPassword {
+			fmt.Fprintln(os.Stderr, "sedit: warning: stdin is not a terminal, so it was used as the new password.\n"+
+				"  To store piped data in a file, use --write or --append.")
 		}
 	case err != nil:
 		return err
@@ -155,13 +170,19 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 		fmt.Fprintf(os.Stderr, "sedit: no changes to %s\n", path)
 		return nil
 	}
-	out, err := Encrypt(password, edited, defaultKDF)
+	return saveFile(path, password, edited, data, src)
+}
+
+// saveFile encrypts content under password and writes it to path. prev is the
+// existing ciphertext, kept as FILE.bak, or nil for a new file.
+func saveFile(path string, password, content, prev []byte, src pwSource) error {
+	out, err := Encrypt(password, content, defaultKDF)
 	if err != nil {
 		return err
 	}
-	if data != nil {
-		// data is the previous ciphertext, so the backup is encrypted too.
-		if err := writeAtomic(backupPath(path), data); err != nil {
+	if prev != nil {
+		// prev is the previous ciphertext, so the backup is encrypted too.
+		if err := writeAtomic(backupPath(path), prev); err != nil {
 			return fmt.Errorf("writing backup: %w", err)
 		}
 	}
@@ -169,7 +190,7 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 		return err
 	}
 	verb := "saved"
-	if data == nil {
+	if prev == nil {
 		verb = "created"
 	}
 	report(verb, path, src)
@@ -425,19 +446,51 @@ func writeAtomic(path string, data []byte) error {
 }
 
 func prompt(msg string) ([]byte, error) {
-	fd := int(os.Stdin.Fd())
-	if term.IsTerminal(fd) {
+	if f, ok := promptTerminal(); ok {
 		fmt.Fprint(os.Stderr, msg)
-		pw, err := term.ReadPassword(fd)
+		pw, err := readSecret(int(f.Fd()))
 		fmt.Fprintln(os.Stderr)
 		return pw, err
+	}
+	if stdinIsData {
+		return nil, errNoTerminal
 	}
 	// Non-interactive: read one line from stdin (useful for scripting/tests).
 	line, err := stdinReader().ReadBytes('\n')
 	if err != nil && len(line) == 0 {
 		return nil, err
 	}
+	stdinUsedForPassword = true
 	return bytes.TrimRight(line, "\r\n"), nil
+}
+
+// Where passwords are asked: on the terminal if stdin is one; otherwise one line
+// is read from stdin (scripting). --write and --append use stdin for data, so
+// they ask on the controlling terminal (/dev/tty) instead, and when there is
+// none there is no way to ask.
+var (
+	promptTTY            *os.File // set while stdin carries data
+	stdinIsData          bool
+	stdinUsedForPassword bool // a password was read from a pipe
+
+	// Replaceable in tests.
+	readSecret      = term.ReadPassword
+	openTTY         = func() (*os.File, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
+	stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+)
+
+var errNoTerminal = errors.New("no terminal to ask for the password on, because stdin is carrying the data; " +
+	"store the password in the Keychain (--remember) or set a default password (--set-default)")
+
+// promptTerminal returns the terminal to ask on, if there is one.
+func promptTerminal() (*os.File, bool) {
+	if promptTTY != nil {
+		return promptTTY, true
+	}
+	if !stdinIsData && stdinIsTerminal() {
+		return os.Stdin, true
+	}
+	return nil, false
 }
 
 // stdin is read through one buffered reader, so that several prompts can be
@@ -463,8 +516,8 @@ func promptNew() ([]byte, error) {
 	if len(a) == 0 {
 		return nil, errors.New("empty password not allowed")
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return a, nil
+	if _, ok := promptTerminal(); !ok {
+		return a, nil // scripting: no confirmation
 	}
 	b, err := prompt("Confirm password: ")
 	if err != nil {

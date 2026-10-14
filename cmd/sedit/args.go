@@ -6,7 +6,7 @@ import (
 )
 
 type opts struct {
-	mode   string // edit, print, passwd, encrypt, remember, forget, share, import, keygen, set-default, forget-default
+	mode   string // edit, print, passwd, encrypt, remember, forget, share, import, keygen, write, append, set-default, forget-default
 	file   string
 	yes    bool
 	choice pwChoice
@@ -33,6 +33,8 @@ var modeFlags = map[string]string{
 	"--share":          "share",
 	"--import":         "import",
 	"--keygen":         "keygen",
+	"--write":          "write",
+	"--append":         "append",
 	"--set-default":    "set-default",
 	"--forget-default": "forget-default",
 }
@@ -60,7 +62,7 @@ func parseArgs(args []string) (opts, error) {
 			return opts{mode: "version"}, nil
 		case modeFlags[a] != "":
 			if modeSet {
-				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --import, --keygen, --set-default, --forget-default may be given")
+				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --import, --keygen, --write, --append, --set-default, --forget-default may be given")
 			}
 			o.mode, modeSet = modeFlags[a], true
 		case a == "-y":
@@ -126,7 +128,7 @@ func parseArgs(args []string) (opts, error) {
 		return bad("-o only applies to --share, --import and --keygen")
 	case o.mode != "import" && len(o.identities) > 0:
 		return bad("-i only applies to --import")
-	case choiceSet && o.mode != "edit" && o.mode != "remember" && o.mode != "passwd" && o.mode != "encrypt" && o.mode != "import":
+	case choiceSet && o.mode != "edit" && o.mode != "remember" && o.mode != "passwd" && o.mode != "encrypt" && o.mode != "import" && o.mode != "write" && o.mode != "append":
 		return bad("--default and --custom only apply when choosing a new password")
 	}
 	return o, nil
