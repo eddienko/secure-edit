@@ -61,6 +61,7 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `d` | Delete a file, after a confirmation that defaults to Cancel; its `.bak` and stored password go too. A folder can be deleted only when it is empty (a leftover `.DS_Store` doesn't count); otherwise the bar says what is in it. |
 | `p` | Change the file's password. |
 | `l` | Lock now. |
+| `v` | Switch the list between one line per file (`▪ Work VPN  vpn.txt`) and **two lines** for a file with a title: the title, and under it the file name in dim text. Files without a title stay on one line, and a folder keeps its name beside its title. The list starts on one line each time. |
 | `R` | Re-read the folder from disk. |
 | `J` `K` | Scroll the text a line down or up, without leaving the list. |
 | `PgDn` `PgUp` `Space` | Scroll the text a page, from the list, while a file's text is shown (on a locked file or a folder they page the list as usual). `Space` goes down. |

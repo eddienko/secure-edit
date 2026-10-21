@@ -32,6 +32,8 @@ type Options struct {
 	TickEvery time.Duration // how often the idle timer is checked; one second if zero
 	Screen    tcell.Screen  // for tests: a simulated screen
 
+	TwoLine bool // list a file that has a title on two lines: the title, then its name
+
 	ClipboardTTL time.Duration  // how long copied text stays on the clipboard; DefaultClipboardTTL if zero
 	Clipboard    clip.Clipboard // for tests: a fake clipboard; the system one if nil
 }
@@ -61,10 +63,14 @@ type App struct {
 	visible       map[string]bool // paths shown while filtering: the matches and the folders leading to them
 	matchCount    int
 
-	busy    bool         // a folder is being moved in the background: keys are ignored
-	quiet   bool         // a file is open in memory but the preview still shows it locked (see unlockFor)
-	holder  *clip.Holder // copies to the clipboard and clears it again; made on first use
-	stopped atomic.Bool  // set when the interface has closed
+	twoLine bool                         // the list shows a titled file on two lines (see rows.go)
+	rows    map[*tview.TreeNode]*rowText // the text of each row, in the two-line list
+	cont    map[*tview.TreeNode]string   // the guide lines to draw before a folder's children
+	painted *tview.TreeNode              // the row drawn as selected, in the two-line list
+	busy    bool                         // a folder is being moved in the background: keys are ignored
+	quiet   bool                         // a file is open in memory but the preview still shows it locked (see unlockFor)
+	holder  *clip.Holder                 // copies to the clipboard and clears it again; made on first use
+	stopped atomic.Bool                  // set when the interface has closed
 }
 
 // New creates the interface for the directory root.
@@ -100,7 +106,8 @@ func New(root string, opts Options) (*App, error) {
 		a.app.SetScreen(opts.Screen)
 	}
 
-	a.tree = tview.NewTreeView().SetGraphics(true)
+	a.twoLine = opts.TwoLine
+	a.tree = tview.NewTreeView().SetGraphics(!a.twoLine).SetAlign(a.twoLine)
 	a.tree.SetBorder(true).SetTitle(" " + treeTitle(root) + " ")
 	a.tree.SetChangedFunc(a.onChanged)
 	a.tree.SetSelectedFunc(a.onEnter)
@@ -186,7 +193,11 @@ func (a *App) label(e Entry) (string, tcell.Style) {
 
 func (a *App) newNode(e Entry) *tview.TreeNode {
 	text, style := a.label(e)
-	n := tview.NewTreeNode(text).SetReference(&e).SetTextStyle(style).SetSelectedTextStyle(invert).SetSelectable(true)
+	selected := invert
+	if a.twoLine {
+		selected = style // reverse video is added by rows.go, so that the guide lines stay out of it
+	}
+	n := tview.NewTreeNode(text).SetReference(&e).SetTextStyle(style).SetSelectedTextStyle(selected).SetSelectable(true)
 	if e.Kind == KindDir {
 		n.SetExpanded(false)
 	}
@@ -202,13 +213,22 @@ func (a *App) fill(n *tview.TreeNode) {
 		a.say(err.Error(), true)
 		return
 	}
+	var shown []Entry
 	for _, c := range entries {
-		if a.filtering() && !a.visible[c.Path] {
-			continue
+		if !a.filtering() || a.visible[c.Path] {
+			shown = append(shown, c)
 		}
+	}
+	for i, c := range shown {
 		child := a.newNode(c)
 		a.parents[child] = n
+		if a.twoLine {
+			a.styleRow(n, child, c, i == len(shown)-1)
+		}
 		n.AddChild(child)
+		if r := a.rows[child]; r != nil && r.comp != nil {
+			n.AddChild(r.comp) // the name, on a line of its own under the title
+		}
 		if c.Kind == KindDir && (a.filtering() || a.expanded[c.Path]) {
 			a.fill(child)
 			child.SetExpanded(true)
@@ -244,7 +264,9 @@ func (a *App) rebuild(selectPath string) {
 		}
 	}
 	a.parents = map[*tview.TreeNode]*tview.TreeNode{}
+	a.rows, a.cont, a.painted = map[*tview.TreeNode]*rowText{}, map[*tview.TreeNode]string{}, nil
 	root := a.newNode(Entry{Name: filepath.Base(a.root), Path: a.root, Kind: KindDir})
+	a.cont[root] = ""
 	a.fill(root)
 	root.SetExpanded(true)
 	a.tree.SetRoot(root)
@@ -274,6 +296,7 @@ func (a *App) rebuild(selectPath string) {
 		p.SetExpanded(true)
 	}
 	a.tree.SetCurrentNode(target)
+	a.paintSelection()
 	a.updateTreeTitle()
 	a.refreshPreview()
 }
@@ -313,6 +336,7 @@ func (a *App) targetDir() string {
 }
 
 func (a *App) onChanged(n *tview.TreeNode) {
+	a.paintSelection()
 	if e, ok := n.GetReference().(*Entry); ok && a.session != nil && a.session.Path != e.Path {
 		a.lock() // moving to another file locks the one you were reading
 	}
@@ -446,7 +470,7 @@ func (a *App) hintItemsFor() []string {
 	case e.Kind == KindDir && a.isTop(e):
 		return []string{move, "→ open", "n new file", "N new folder", "/ filter", "i info", "R refresh"}
 	case e.Kind == KindDir:
-		return []string{move, "→ open", "n new file", "N new folder", "/ filter", "i info", "r rename", "m move", "d delete", "← close", "R refresh"}
+		return []string{move, "→ open", "n new file", "N new folder", "/ filter", "i info", "r rename", "m move", "d delete", "v layout", "← close", "R refresh"}
 	case e.Kind != KindSedit:
 		return []string{move, "/ filter", "n new", "R refresh"}
 	case a.session != nil && !a.session.Locked() && a.session.Path == e.Path:
@@ -610,6 +634,8 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.newFile()
 		case 'N':
 			a.newFolder()
+		case 'v':
+			a.toggleLayout()
 		case 'm':
 			a.moveCurrent()
 		case 'r':
@@ -658,7 +684,9 @@ func (a *App) expandCurrent(open bool) {
 func (a *App) selectEdge(first bool) {
 	var visible []*tview.TreeNode
 	a.tree.GetRoot().Walk(func(n, _ *tview.TreeNode) bool {
-		visible = append(visible, n)
+		if _, ok := n.GetReference().(*Entry); ok { // not the name lines of the two-line list
+			visible = append(visible, n)
+		}
 		return n.IsExpanded() // don't go into closed folders
 	})
 	if len(visible) == 0 {
@@ -780,6 +808,7 @@ func (a *App) help() {
 		"r        rename        d     delete (a folder only if empty)",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
+		"v        list titled files on one line or on two (title, then name)",
 		"J K      scroll the text a line     PgUp PgDn  a page     Space  a page down",
 		"Tab      move into the text to scroll it (Esc or Tab comes back)",
 		"q        quit",
@@ -790,7 +819,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 78, 27)
+	}, "\n"), 78, 28)
 }
 
 // ---- actions ------------------------------------------------------------
