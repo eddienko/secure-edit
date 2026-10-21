@@ -51,6 +51,8 @@ edit.
   public key, which they can read with the standard `age` tool and no `sedit`.
   `sedit --import` turns such a file (or any age file) into a `sedit` file, and
   `sedit --keygen` creates the key pair you need to receive one.
+- **A terminal interface:** `sedit-tui` shows your files in a list with a preview
+  that stays locked until you press Enter, and re-locks when you move on.
 - **Tidy file management:** `sedit --mv` and `sedit --rm` move and delete a file
   together with its `.bak` backup and its remembered password, which a plain
   `mv` or `rm` would leave behind.
@@ -67,7 +69,8 @@ edit.
 
 ### From a release
 
-Download the tarball for your platform (macOS or Linux, arm64 or amd64) from the
+Download the tarball for your platform (macOS or Linux, arm64 or amd64; it holds
+`sedit` and the terminal interface `sedit-tui`) from the
 [Releases page](https://github.com/eddienko/secure-edit/releases), check it
 against `SHA256SUMS`, and put `sedit` somewhere on your `PATH`:
 
@@ -93,6 +96,7 @@ With `go install`, which puts `sedit` in `$(go env GOBIN)` (default `~/go/bin`):
 
 ```sh
 go install github.com/eddienko/secure-edit/cmd/sedit@latest
+go install github.com/eddienko/secure-edit/cmd/sedit-tui@latest   # the terminal interface
 ```
 
 Or from a clone:
@@ -101,7 +105,8 @@ Or from a clone:
 git clone https://github.com/eddienko/secure-edit.git
 cd secure-edit
 go build -o sedit ./cmd/sedit
-# optionally: mv sedit /usr/local/bin/
+go build -o sedit-tui ./cmd/sedit-tui
+# optionally: mv sedit sedit-tui /usr/local/bin/
 ```
 
 ## Usage
@@ -188,6 +193,73 @@ nvim get the leak protections described above.
 
 To make the opt-out permanent, put `export SEDIT_STATUSLINE=0` in your shell
 profile. Anything else, or leaving it unset, keeps the banner.
+
+### Terminal interface (sedit-tui)
+
+`sedit-tui` is a full-screen way to browse and manage a folder of `sedit` files.
+It is a separate program, built from the same code as `sedit`, and uses the same
+passwords, Keychain entries and editor settings.
+
+```sh
+sedit-tui                  # the current folder
+sedit-tui ~/secrets        # a folder
+sedit-tui --idle 5m ~/secrets
+```
+
+```
+┌ ~/secrets ─────────────────┐┌ vpn.txt  (unlocked, locks in 1:41) ────────────┐
+│ secrets/                   ││ host=vpn.example.com                           │
+│ ├── personal/              ││ user=admin                                     │
+│ ├── work/                  ││ token=...                                      │
+│ ├── ▪ notes.txt            ││                                                │
+│ ├── · readme.md            ││                                                │
+│ └── ○ team.age             ││                                                │
+└────────────────────────────┘└────────────────────────────────────────────────┘
+ ↑↓ move  ⏎ unlock  e edit  n new  r rename  d delete  p password  l lock  ? help  q quit
+```
+
+The list shows folders, then files. `▪` is a `sedit` file, `○` an age file (turn
+it into a `sedit` file with `sedit --import`) and `·` anything else. Backups
+(`.bak`), lock files and dot files are hidden.
+
+**Nothing is decrypted until you ask.** Selecting a file shows `LOCKED`. Press
+**Enter** to unlock it: if its password is stored in the Keychain, or the default
+password fits, it opens at once; otherwise you are asked (what you type is shown
+as dots). The preview then shows the text, and you can scroll it with **Tab**.
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` `Home` `End` | Move (`g` and `G` also go to the top and bottom). |
+| `→` `←` | Open and close a folder; `←` on a file goes to its folder. |
+| `Enter` | Unlock and show the file (or open or close a folder). |
+| `e` | Edit in your editor: unlocks first, then runs the same editing as `sedit FILE`, including the vim protections and the `SEDIT ENCRYPTED` banner. The previous version is kept as `.bak`. |
+| `n` | New file in the selected folder. Asks for a name, then a password (the default, or one typed twice), then opens the editor. A new file left empty is not created. |
+| `r` | Rename or move (a new name, or a path relative to the file's folder). Its `.bak` and stored password go with it. |
+| `d` | Delete, after a confirmation that defaults to Cancel. Its `.bak` and stored password go too. |
+| `p` | Change the file's password. |
+| `l` | Lock now. |
+| `R` | Re-read the folder from disk. |
+| `Tab` | Scroll the preview (`Esc` or `Tab` returns to the list). |
+| `?`, `q` | Help, quit. |
+
+**Locking.** Only one file is unlocked at a time. A file locks again when you move
+to another one, with `l`, when you quit, and after **2 minutes without a key
+press** (change that with `--idle`, for example `--idle 30s`). Locking zeroes the
+decrypted text and the password in memory. While you are in the editor the timer
+doesn't run.
+
+**What it does not do (yet).** Sharing, importing, key generation and encrypting a
+plain file are only in `sedit`. There is no search inside files, and no mouse.
+Files larger than 1 MiB are shown cut off, and binary content is not displayed.
+
+**Security notes.** The interface uses the terminal's alternate screen, so what it
+shows isn't left in your scrollback when you quit. But text on screen is visible to
+anyone looking, and to screenshots, screen recording and `tmux` logging, so the
+usual advice applies: lock (`l`) when you step away. The decrypted text and the
+passwords you type are kept in memory that is zeroed on lock, but the terminal
+library's own screen buffer holds what is displayed until it is redrawn. As
+everywhere in `sedit`, a graphical editor is ignored unless you set
+`SEDIT_EDITOR` (see [Choosing an editor](#choosing-an-editor)).
 
 ### Moving and deleting files
 
@@ -605,9 +677,12 @@ ends can reuse them:
 | `internal/keystore` | Remembering passwords outside the files: the macOS Keychain, or nothing elsewhere. |
 | `internal/unlock` | Opening a file with whichever password is available: its own stored one, then the default, then one the caller asks the user for. |
 | `internal/editor` | Running your editor on a private temp file, with the extra protection and cues for vim. |
+| `internal/fileops` | Moving, deleting and re-keying a file together with its backup and remembered password. |
+| `internal/tui` | The terminal interface: file list, locked preview, and the dialogs. |
+| `cmd/sedit-tui` | The `sedit-tui` program: starts the interface. |
 
-`vault`, `keystore` and `editor` don't depend on each other; `unlock` uses
-`keystore` and `vault`.
+`vault`, `keystore` and `editor` don't depend on each other; `unlock` and
+`fileops` use `keystore` and `vault`; `tui` uses them all.
 
 ### Publishing a new version
 

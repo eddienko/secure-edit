@@ -494,3 +494,72 @@ func TestRemoveStillRemovesWhenTheKeychainMisbehaves(t *testing.T) {
 		t.Errorf("result %+v", res)
 	}
 }
+
+func TestRekeyChangesThePasswordWithoutABackup(t *testing.T) {
+	useStore(t)
+	dir := t.TempDir()
+	path := seditFile(t, dir, "a.txt", "hello") // password "pw"
+
+	res, err := Rekey(path, []byte("hello"), []byte("newpw"), false)
+	if err != nil || len(res.Warnings) != 0 || res.Entry {
+		t.Fatalf("%v %+v", err, res)
+	}
+	data := read(t, path)
+	if got, err := vault.Decrypt([]byte("newpw"), data); err != nil || string(got) != "hello" {
+		t.Fatalf("new password: %q %v", got, err)
+	}
+	if _, err := vault.Decrypt([]byte("pw"), data); err == nil {
+		t.Error("the old password still works")
+	}
+	gone(t, vault.BackupPath(path))
+}
+
+func TestRekeyWarnsAboutAnOldBackup(t *testing.T) {
+	useStore(t)
+	dir := t.TempDir()
+	path := seditFile(t, dir, "a.txt", "hello")
+	seditFile(t, dir, "a.txt.bak", "previous")
+	res, err := Rekey(path, []byte("hello"), []byte("newpw"), false)
+	if err != nil || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "still encrypted with the old password") {
+		t.Fatalf("%v %+v", err, res)
+	}
+	read(t, path+".bak") // left as it was
+}
+
+func TestRekeyUpdatesAStoredPassword(t *testing.T) {
+	f := useStore(t)
+	path := seditFile(t, t.TempDir(), "a.txt", "hello")
+	f.m[account(t, path)] = []byte("pw")
+
+	res, err := Rekey(path, []byte("hello"), []byte("newpw"), true)
+	if err != nil || !res.Entry {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if string(f.m[account(t, path)]) != "newpw" {
+		t.Errorf("stored %q", f.m[account(t, path)])
+	}
+
+	// Not asked to update: the entry is left alone.
+	f.m[account(t, path)] = []byte("untouched")
+	if _, err := Rekey(path, []byte("hello"), []byte("third"), false); err != nil {
+		t.Fatal(err)
+	}
+	if string(f.m[account(t, path)]) != "untouched" {
+		t.Error("the entry was changed although updateStored was false")
+	}
+}
+
+// The file is re-keyed even if the Keychain can't be updated; the error says so.
+func TestRekeyReportsAStoreFailureButRekeys(t *testing.T) {
+	f := useStore(t)
+	f.setErr = errors.New("keychain is locked")
+	path := seditFile(t, t.TempDir(), "a.txt", "hello")
+	_, err := Rekey(path, []byte("hello"), []byte("newpw"), true)
+	var se *StoreUpdateError
+	if !errors.As(err, &se) || !strings.Contains(err.Error(), "sedit --forget") {
+		t.Fatalf("got %v", err)
+	}
+	if got, err := vault.Decrypt([]byte("newpw"), read(t, path)); err != nil || string(got) != "hello" {
+		t.Errorf("the file was not re-keyed: %q %v", got, err)
+	}
+}

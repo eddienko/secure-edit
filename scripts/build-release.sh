@@ -16,9 +16,11 @@ for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
 	arch=${target#*/}
 	name=sedit_${version}_${os}_${arch}
 	mkdir -p "$out/$name"
-	CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
-		go build -trimpath -ldflags "-s -w -X main.buildVersion=$version" \
-		-o "$out/$name/sedit" ./cmd/sedit
+	for cmd in sedit sedit-tui; do
+		CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
+			go build -trimpath -ldflags "-s -w -X main.buildVersion=$version" \
+			-o "$out/$name/$cmd" "./cmd/$cmd"
+	done
 	cp README.md LICENSE "$out/$name/"
 	tar -C "$out" -czf "$out/$name.tar.gz" "$name"
 	rm -rf "${out:?}/$name"

@@ -227,3 +227,47 @@ func Remove(path string) (res Result, err error) {
 	}
 	return res, nil
 }
+
+// StoreUpdateError means a file was re-encrypted under a new password but the
+// password remembered for it could not be updated. The file is fine, and the
+// stale entry is harmless but no longer works (it is removed on next use).
+type StoreUpdateError struct {
+	Path string
+	Err  error
+}
+
+func (e *StoreUpdateError) Error() string {
+	return fmt.Sprintf("password changed, but updating the stored one failed (run \"sedit --forget %s\"): %v", e.Path, e.Err)
+}
+
+func (e *StoreUpdateError) Unwrap() error { return e.Err }
+
+// Rekey re-encrypts plain under newPassword and writes it to path, replacing the
+// file. No backup is made, because it would be a copy under the old password; an
+// existing FILE.bak still is one, which is reported as a warning. If
+// updateStored is set, the password remembered for the file is replaced too.
+//
+// The caller opens the file (so has plain) and should hold vault.Lock(path).
+func Rekey(path string, plain, newPassword []byte, updateStored bool) (res Result, err error) {
+	out, err := vault.Encrypt(newPassword, plain, vault.DefaultKDF)
+	if err != nil {
+		return res, err
+	}
+	if exists(vault.BackupPath(path)) {
+		res.warn("%s is still encrypted with the old password", vault.BackupPath(path))
+	}
+	if err := vault.WriteAtomic(path, out); err != nil {
+		return res, err
+	}
+	if updateStored && keystore.Backend != nil {
+		account, err := keystore.Account(path)
+		if err == nil {
+			err = keystore.Backend.Set(account, newPassword)
+		}
+		if err != nil {
+			return res, &StoreUpdateError{Path: path, Err: err}
+		}
+		res.Entry = true
+	}
+	return res, nil
+}

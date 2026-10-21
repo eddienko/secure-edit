@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/eddienko/secure-edit/internal/editor"
+	"github.com/eddienko/secure-edit/internal/fileops"
 	"github.com/eddienko/secure-edit/internal/keystore"
 	"github.com/eddienko/secure-edit/internal/unlock"
 	"github.com/eddienko/secure-edit/internal/vault"
@@ -337,20 +338,10 @@ func passwd(path string, choice pwChoice) error {
 		return err
 	}
 	defer vault.Wipe(password)
-	out, err := vault.Encrypt(password, plain, vault.DefaultKDF)
+	res, err := fileops.Rekey(path, plain, password, src == unlock.SrcFile)
+	warnAll(res)
 	if err != nil {
 		return err
-	}
-	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
-		fmt.Fprintf(os.Stderr, "warning: %s is still encrypted with the old password\n", vault.BackupPath(path))
-	}
-	if err := vault.WriteAtomic(path, out); err != nil {
-		return err
-	}
-	if src == unlock.SrcFile {
-		if err := unlock.StorePassword(path, password); err != nil {
-			return fmt.Errorf("password changed, but updating the stored one failed (run \"sedit --forget %s\"): %w", path, err)
-		}
 	}
 	fmt.Fprintf(os.Stderr, "sedit: password changed for %s\n", path)
 	return nil

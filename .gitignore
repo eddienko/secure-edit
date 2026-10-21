@@ -1,5 +1,6 @@
 # built binary
 /sedit
+/sedit-tui
 
 # lock files created next to edited files
 .*.lock
