@@ -243,6 +243,11 @@ func TestParseArgs(t *testing.T) {
 		"-i k --import f.age":             {mode: "import", file: "f.age", identities: []string{"k"}},
 		"--keygen -o k":                   {mode: "keygen", out: "k"},
 		"--write f":                       {mode: "write", file: "f"},
+		"--mv a b":                        {mode: "mv", file: "a", dest: "b"},
+		"--rm a":                          {mode: "rm", file: "a", files: []string{"a"}},
+		"--rm a b c":                      {mode: "rm", file: "a", files: []string{"a", "b", "c"}},
+		"--rm -y a b":                     {mode: "rm", file: "a", files: []string{"a", "b"}, yes: true},
+		"a --rm -y":                       {mode: "rm", file: "a", files: []string{"a"}, yes: true},
 		"--append f":                      {mode: "append", file: "f"},
 		"--default --write f":             {mode: "write", file: "f", choice: choiceDefault},
 		"--append --custom f":             {mode: "append", file: "f", choice: choiceCustom},
@@ -259,7 +264,8 @@ func TestParseArgs(t *testing.T) {
 		"-y f", "-p --default f", "--set-default f", "--forget-default f", "--forget --custom f",
 		"--share f", "--share", "--share f --to", "--share f --to k -o", "--share f --to k -o a -o b",
 		"-i k f", "--import f -i", "--import f --to k", "--import f -a", "--import f -y", "--import f -o a -o b",
-		"--share f --to k -i k2", "--keygen", "--keygen f -o k", "--keygen -o k -y", "--keygen -o k --default", "--write", "--append", "--write f -y", "--write f -o x", "--write f --to k",
+		"--share f --to k -i k2", "--keygen", "--keygen f -o k", "--keygen -o k -y", "--keygen -o k --default", "--mv", "--mv a", "--mv a b c", "--rm", "--rm -y", "--mv a b -y", "--mv a b --default",
+		"--rm a --custom", "--mv a b -o x", "--rm a --to k", "--mv --rm a b", "--mv a b --write", "--write", "--append", "--write f -y", "--write f -o x", "--write f --to k",
 		"--write f --append", "--write f -p", "--write f -i k",
 		"--keygen -o k -i x", "--keygen -o k --to a", "--pq f", "--share f --to k --pq", "-o x f", "-a f", "-R r f", "--share f --to k --default f2"} {
 		if _, err := parseArgs(strings.Fields(in)); err == nil {

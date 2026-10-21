@@ -6,7 +6,7 @@ import (
 )
 
 type opts struct {
-	mode   string // edit, print, passwd, encrypt, remember, forget, share, import, keygen, write, append, set-default, forget-default
+	mode   string // edit, print, passwd, encrypt, remember, forget, share, import, keygen, write, append, mv, rm, set-default, forget-default
 	file   string
 	yes    bool
 	choice pwChoice
@@ -22,6 +22,10 @@ type opts struct {
 
 	// --keygen
 	pq bool // --pq
+
+	// --mv, --rm
+	dest  string   // --mv OLD NEW: NEW
+	files []string // --rm FILE...
 }
 
 var modeFlags = map[string]string{
@@ -33,6 +37,8 @@ var modeFlags = map[string]string{
 	"--share":          "share",
 	"--import":         "import",
 	"--keygen":         "keygen",
+	"--mv":             "mv",
+	"--rm":             "rm",
 	"--write":          "write",
 	"--append":         "append",
 	"--set-default":    "set-default",
@@ -43,6 +49,7 @@ var modeFlags = map[string]string{
 func parseArgs(args []string) (opts, error) {
 	o := opts{mode: "edit"}
 	modeSet, choiceSet := false, false
+	var positional []string
 	bad := func(msg string) (opts, error) { return opts{}, fmt.Errorf("%s\n\n%s", msg, usage) }
 
 	// value returns the argument after args[i], which belongs to the flag at i.
@@ -62,7 +69,7 @@ func parseArgs(args []string) (opts, error) {
 			return opts{mode: "version"}, nil
 		case modeFlags[a] != "":
 			if modeSet {
-				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --import, --keygen, --write, --append, --set-default, --forget-default may be given")
+				return bad("only one of -p, --passwd, --encrypt, --remember, --forget, --share, --import, --keygen, --write, --append, --mv, --rm, --set-default, --forget-default may be given")
 			}
 			o.mode, modeSet = modeFlags[a], true
 		case a == "-y":
@@ -101,21 +108,40 @@ func parseArgs(args []string) (opts, error) {
 			o.choice, choiceSet = c, true
 		case strings.HasPrefix(a, "-"):
 			return bad("unknown option " + a)
-		case o.file != "":
-			return bad("only one FILE may be given")
 		default:
-			o.file = a
+			positional = append(positional, a)
 		}
 	}
 
-	needsFile := o.mode != "set-default" && o.mode != "forget-default" && o.mode != "keygen"
+	switch o.mode {
+	case "mv":
+		if len(positional) != 2 {
+			return bad("--mv needs two arguments: OLD and NEW")
+		}
+		o.file, o.dest = positional[0], positional[1]
+	case "rm":
+		if len(positional) == 0 {
+			return bad("missing FILE")
+		}
+		o.files, o.file = positional, positional[0]
+	case "set-default", "forget-default", "keygen":
+		if len(positional) > 0 {
+			return bad(fmt.Sprintf("--%s takes no FILE", o.mode))
+		}
+	default:
+		switch len(positional) {
+		case 0:
+			return bad("missing FILE")
+		case 1:
+			o.file = positional[0]
+		default:
+			return bad("only one FILE may be given")
+		}
+	}
+
 	switch {
-	case needsFile && o.file == "":
-		return bad("missing FILE")
-	case !needsFile && o.file != "":
-		return bad(fmt.Sprintf("--%s takes no FILE", o.mode))
-	case o.yes && o.mode != "encrypt":
-		return bad("-y only applies to --encrypt")
+	case o.yes && o.mode != "encrypt" && o.mode != "rm":
+		return bad("-y only applies to --encrypt and --rm")
 	case o.mode == "share" && len(o.to) == 0 && len(o.recipFiles) == 0:
 		return bad("--share needs at least one recipient (--to KEY or -R FILE)")
 	case o.mode != "share" && (len(o.to) > 0 || len(o.recipFiles) > 0 || o.armor):

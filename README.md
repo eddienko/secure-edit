@@ -51,6 +51,9 @@ edit.
   public key, which they can read with the standard `age` tool and no `sedit`.
   `sedit --import` turns such a file (or any age file) into a `sedit` file, and
   `sedit --keygen` creates the key pair you need to receive one.
+- **Tidy file management:** `sedit --mv` and `sedit --rm` move and delete a file
+  together with its `.bak` backup and its remembered password, which a plain
+  `mv` or `rm` would leave behind.
 - **Previous version kept:** each save keeps the old version, still encrypted,
   as `FILE.bak`.
 - **Optional Keychain support (macOS, opt-in):** remember a file's password in
@@ -110,6 +113,8 @@ sedit --write FILE              make FILE's contents whatever is piped in on std
 sedit --append FILE             add whatever is piped in to the end of FILE
 sedit --passwd FILE             change FILE's password
 sedit --encrypt [-y] FILE       encrypt an existing plaintext FILE in place
+sedit --mv OLD NEW              move a file, with its backup and remembered password
+sedit --rm [-y] FILE...         delete files, with their backups and remembered passwords
 sedit --share FILE --to KEY     write a copy of FILE for someone else (see below)
 sedit --import FILE.age -i KEY  turn an age-encrypted file into a sedit file
 sedit --keygen -o FILE          create an age key pair for receiving shared files
@@ -183,6 +188,39 @@ nvim get the leak protections described above.
 
 To make the opt-out permanent, put `export SEDIT_STATUSLINE=0` in your shell
 profile. Anything else, or leaving it unset, keeps the banner.
+
+### Moving and deleting files
+
+A `sedit` file has things that belong to it: its `FILE.bak` backup, and, if you
+used `--remember`, a password stored in the Keychain under the file's path. A
+plain `mv` leaves the backup behind and orphans the Keychain entry; a plain `rm`
+leaves both. These commands look after all of it:
+
+```sh
+sedit --mv secrets.txt archive/old-secrets.txt     # rename or move
+sedit --mv secrets.txt archive/                    # into an existing directory
+sedit --rm old-notes.txt                           # asks first
+sedit --rm -y a.txt b.txt c.txt                    # several files, no question
+```
+
+- **`--mv`** moves the file, its `.bak` and its remembered password to the new
+  place, and tells you what came along. It works across file systems, and the
+  file keeps its permissions.
+- **`--rm`** deletes the file, its `.bak`, its remembered password and its lock
+  file. It asks for confirmation (`-y` skips that, and is required when there is
+  no terminal). **It is not a secure erase:** the file is encrypted, but its data
+  may remain in backups and on disk. It deletes only that file's own Keychain
+  entry, never the default password.
+- **They never overwrite.** `--mv` stops if the destination, or a `.bak` there,
+  already exists.
+- **Only `sedit` files.** Anything else (a plain file, a directory) is refused, so
+  these can't be used as a general `mv` or `rm`. Symlinks are refused too, since
+  following one would move or delete the wrong thing; use the real file.
+- **`--rm` checks every file first.** If one name is wrong, nothing is deleted.
+- A file that another `sedit` has open is refused.
+- A problem with the Keychain (it is locked, say) is reported as a warning, not
+  an error: the file operation still happens, and an old entry is kept rather than
+  lost.
 
 ### Piping data in
 
@@ -396,10 +434,12 @@ the contents. On other platforms `--remember` and `--forget` report that they
 aren't supported.
 
 **Cleaning up stale entries.** A stored password that no longer opens its file is
-removed automatically the next time you use that file. But if you **move, rename
-or delete** a file you had remembered, nothing notices: its entry stays in the
-keychain, still holding a working password that any program running as you can
-read. `sedit` can't list its entries, so clean them up yourself:
+removed automatically the next time you use that file. Use
+[`sedit --mv` and `sedit --rm`](#moving-and-deleting-files) to move and delete
+remembered files, and the entries follow along. But if you move or delete such a
+file *with plain `mv` or `rm`*, nothing notices: its entry stays in the keychain,
+still holding a working password that any program running as you can read.
+`sedit` can't list its entries, so clean those up yourself:
 
 ```sh
 sedit --forget /old/path/to/secrets.enc

@@ -34,6 +34,8 @@ const usage = `usage:
                           turn an age-encrypted FILE.age into a sedit file
   sedit --keygen -o FILE [--pq]
                           create an age key pair, for receiving shared files
+  sedit --mv OLD NEW      move a file, with its backup and stored password
+  sedit --rm [-y] FILE... delete files, with their backups and stored passwords
   sedit --remember FILE   edit FILE and save its password in the macOS Keychain
   sedit --forget FILE     remove FILE's password from the Keychain
   sedit --set-default     store a default password in the macOS Keychain
@@ -49,6 +51,9 @@ FILE.age ("-" is stdout) and -a writes ASCII armor. Recipients decrypt it with
 "age -d -i KEY" and don't need sedit. --import is the reverse: -i names your
 age or SSH private key (omit it for a passphrase-encrypted file); OUT defaults
 to FILE.age without the .age, and an existing file is never overwritten.
+--mv and --rm also move or delete FILE.bak and the password remembered for the
+file, which a plain mv or rm would leave behind. They refuse symlinks, never
+overwrite, and --rm asks first (-y to skip). It is not a secure erase.
 --keygen writes a new private key to FILE (mode 0600, never overwriting) and
 prints the public key to give to senders.
 A stored password (per file, then the default) is used instead of prompting.
@@ -79,7 +84,8 @@ func run(args []string) error {
 		fmt.Println("sedit", versionString())
 		return nil
 	}
-	if o.file != "" {
+	// --mv and --rm deal with symlinks themselves: they must not follow them.
+	if o.file != "" && o.mode != "mv" && o.mode != "rm" {
 		if o.file, err = vault.ResolvePath(o.file); err != nil {
 			return err
 		}
@@ -97,6 +103,10 @@ func run(args []string) error {
 		return encrypt(o.file, o.yes, o.choice)
 	case "forget":
 		return forget(o.file)
+	case "mv":
+		return mv(o.file, o.dest)
+	case "rm":
+		return rm(o.files, o.yes)
 	case "write":
 		return writeStdin(o.file, false, o.choice)
 	case "append":
@@ -273,7 +283,7 @@ func encrypt(path string, yes bool, choice pwChoice) error {
 }
 
 func confirm(msg string) error {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return errors.New("not a terminal; pass -y to skip confirmation")
 	}
 	fmt.Fprint(os.Stderr, msg)
