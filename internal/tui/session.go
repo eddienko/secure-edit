@@ -162,6 +162,42 @@ func (s *Session) Edit() (saved bool, err error) {
 	return true, err
 }
 
+// SaveText saves edited, which the session takes ownership of, as the new text
+// of a file that exists, keeping the previous version as FILE.bak. It refuses if
+// the file has changed on disk since the session read it, so that what someone
+// else wrote is not overwritten. It reports whether anything was saved.
+func (s *Session) SaveText(edited []byte) (saved bool, err error) {
+	if s.Locked() {
+		return false, errors.New("the file is locked")
+	}
+	if s.Cipher == nil {
+		return false, errors.New("the file does not exist yet")
+	}
+	release, err := vault.Lock(s.Path)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		return false, err
+	}
+	if !bytes.Equal(data, s.Cipher) {
+		return false, fmt.Errorf("%s was changed on disk since you opened it; close without saving and open it again", s.Path)
+	}
+	if bytes.Equal(edited, s.Plain) {
+		vault.Wipe(edited)
+		return false, nil
+	}
+	if err := vault.Save(s.Path, s.Password, edited, s.Cipher); err != nil {
+		return false, err
+	}
+	vault.Wipe(s.Plain)
+	s.Plain = edited
+	s.Cipher, err = os.ReadFile(s.Path)
+	return true, err
+}
+
 // Rekey changes the file's password. The session then holds the new one, and
 // takes ownership of newPassword.
 func (s *Session) Rekey(newPassword []byte) (fileops.Result, error) {

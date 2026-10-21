@@ -53,6 +53,7 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `→` `←` | Open and close a folder; `←` on a file goes to its folder. |
 | `Enter` | Unlock and show the file (or open or close a folder). |
 | `e` | Edit in your editor: unlocks first, then runs the same editing as `sedit FILE`, including the vim protections and the `SEDIT ENCRYPTED` banner. The previous version is kept as `.bak`. |
+| `E` | Edit in the built-in editor, in the right pane, with no other program: unlocks first. See **The built-in editor** below. |
 | `y` | Copy the whole text to the clipboard (unlocks first if needed). It is cleared again after 30 seconds; see **Clipboard** below. |
 | `/` | Filter the list. Type words and only the files whose title or name contain all of them (any case) stay, with the folders leading to them opened for you; searches the whole tree, up to 5000 entries. `↑` `↓` pick a match while you type, **Enter** keeps the filter and goes back to the list, **Esc** removes it (also from the list). The first match is selected, and the one you were on stays selected if it still matches. A file that was just made or moved and doesn't match clears the filter rather than disappear. |
 | `n` | New file in the selected folder. Asks for a name, a title and a description in one box (Tab and Shift-Tab move between the fields; the title and description are optional; the description can have several lines, with Enter starting a new one, and **Ctrl-S** or Enter in the name or title creates the file), then a password (the default, or one typed twice), then opens the editor. Esc cancels. A new file left empty is not created. |
@@ -69,6 +70,32 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `PgDn` `PgUp` `Space` | Scroll the text a page, from the list, while a file's text is shown (on a locked file or a folder they page the list as usual). `Space` goes down. |
 | `Tab` | Move into the text to scroll it with the arrow keys (`Esc` or `Tab` returns to the list). `y` works there too. |
 | `?`, `q` | Help, quit. |
+
+**The built-in editor.** `e` runs your own editor; `E` edits the text in the right pane
+instead, with the keys below. It suits quick changes to a note or a credentials
+file, and it never starts another program or writes a temporary file.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl-S` | Save, encrypted, keeping the previous version as `.bak`, and stay in the editor. |
+| `Esc` | Close. With unsaved changes it asks: keep editing (the default), save and close, or discard. |
+| `Ctrl-F` | Find text (any case) and select the first match after the cursor. |
+| `F3` | Select the next match, wrapping round to the start. |
+| `Ctrl-G` | Go to a line number. |
+| `Ctrl-T` | Show or hide line numbers. While they show, lines don't wrap and long ones scroll sideways. |
+| `Ctrl-A` `Ctrl-E` | Go to the start and end of the line (also `Home` and `End`), whole lines, not just the wrapped row. |
+| `Ctrl-Z` `Ctrl-Y` | Undo and redo. |
+| `Ctrl-L` | Select everything. |
+| `Ctrl-Q` `Ctrl-X` `Ctrl-V` | Copy, cut and paste inside the editor. (This clipboard is the editor's own, not the system one; use `y` to copy the text out.) Pasting from the terminal works as usual. |
+
+The pane's title says `(editing)`, or `(editing, not saved)` after a change. The
+idle timer **does not lock** a file with unsaved changes, so nothing is thrown away
+behind your back, but it locks as usual once you have saved or closed. If the file
+is changed on disk by someone else while you edit, saving is refused rather than
+overwriting their change; close, and open it again. `E` is for text files up to 256 KiB
+and for files that already exist: use `e` for a new file, a larger one or binary data.
+The text area keeps copies of the text in memory that can't be zeroed; see
+[Limitations](security.md#limitations).
 
 **The bar at the bottom** shows the keys that matter for what is selected: a
 folder, a locked file, a file that is open, or the text when you are scrolling it.
@@ -124,8 +151,8 @@ a folder, show no such block.
 **Locking.** Only one file is unlocked at a time. A file locks again when you move
 to another one, with `l`, when you quit, and after **2 minutes without a key
 press** (change that with `--idle`, for example `--idle 30s`). Locking zeroes the
-decrypted text and the password in memory. While you are in the editor the timer
-doesn't run.
+decrypted text and the password in memory. While you are in your own editor (`e`) the timer
+doesn't run, and in the built-in one (`E`) it doesn't lock unsaved changes.
 
 **Clipboard.** Selecting text with the mouse in the preview also selects the file
 list beside it, because a terminal selects whole rows. So press `y` to copy the

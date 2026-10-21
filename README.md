@@ -30,6 +30,7 @@ The list on the left shows your files and folders; the preview on the right stay
 |-----|------|
 | `⏎` | Unlock the selected file and show it (a folder opens or closes) |
 | `e` | Edit it in your editor (`$SEDIT_EDITOR`, `$VISUAL`, `$EDITOR`, or vim) |
+| `E` | Edit it in the built-in editor, in the right pane (save with `Ctrl-S`, find with `Ctrl-F`) |
 | `y` | Copy the text to the clipboard, cleared again after 30 seconds |
 | `n` `N` | New file, new folder (each with an optional title and description) |
 | `/` | Filter the list by title or name |
@@ -64,6 +65,9 @@ See [docs/command-line.md](docs/command-line.md).
   plaintext copies (see [Choosing an editor](docs/command-line.md#choosing-an-editor)).
   For vim, vi and nvim, `sedit` also turns off swap, backup, undo and viminfo
   files and shows a `SEDIT ENCRYPTED` banner so you know you are in a sedit session.
+- **A built-in editor too:** `E` edits the text right in the interface, with find,
+  go to line and line numbers, and no other program or temp file involved. `e` still
+  uses your own editor (see [the interface](docs/interface.md)).
 - **Titles, descriptions and folders.** Give a file or folder a title and a
   description that show while it is locked, and organise files in folders you can
   make, rename, move and delete from the interface. File labels are stored in the
