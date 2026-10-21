@@ -855,7 +855,7 @@ func TestUsesOnlyTheTerminalsOwnColours(t *testing.T) {
 	h.onlyTerminalColours("a plain file")
 
 	h.selectFile("projects")
-	h.waitFor("items")
+	h.waitFor("Enter opens or closes it")
 	h.onlyTerminalColours("a folder")
 
 	h.press('e') // an error message in the status line

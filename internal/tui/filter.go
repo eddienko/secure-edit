@@ -9,9 +9,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-// The list can be narrowed with /: type a few words and only the files whose
-// title or name contain all of them (in any case), and the folders that lead to
-// them, are listed. The folders on the way are opened for you, so a match deep in
+// The list can be narrowed with /: type a few words and only the files and
+// folders whose title or name contain all of them (in any case), what is inside
+// a matching folder, and the folders that lead to a match, are listed. The folders on the way are opened for you, so a match deep in
 // the tree is not hidden behind a closed folder.
 
 const (
@@ -70,14 +70,28 @@ func (a *App) computeVisible() {
 		a.index = walk(a.root)
 	}
 	a.visible = map[string]bool{}
+	var matchedDirs []string
 	for _, e := range a.index {
 		if !e.matches(words) {
 			continue
 		}
 		a.matchCount++
 		a.visible[e.Path] = true
+		if e.Kind == KindDir {
+			matchedDirs = append(matchedDirs, e.Path+string(filepath.Separator))
+		}
 		for p := filepath.Dir(e.Path); p != a.root && strings.HasPrefix(p, a.root); p = filepath.Dir(p) {
 			a.visible[p] = true
+		}
+	}
+	// A folder that matches shows everything in it: someone looking for "bank"
+	// wants the whole Banking folder, not only what has "bank" in its name.
+	for _, e := range a.index {
+		for _, d := range matchedDirs {
+			if strings.HasPrefix(e.Path, d) {
+				a.visible[e.Path] = true
+				break
+			}
 		}
 	}
 }

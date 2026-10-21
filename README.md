@@ -244,6 +244,10 @@ fail to open, but until it is opened they can't be vouched for: treat what
 interface shows any it finds in a file as dots. `--share` does not pass them on:
 the copy for someone else contains only the text.
 
+**Folders** can have a title and description too, in `sedit-tui` only: see
+[docs/tui.md](docs/tui.md). They are kept unencrypted in a hidden `.sedit-folder`
+file inside the folder.
+
 A file with a title or description uses format version 2, which sedit before
 1.4 cannot open (it says `unsupported file version 2`). Files without them stay
 version 1, readable by every version.
@@ -665,11 +669,11 @@ ends can reuse them:
 | Package | What it does |
 |---------|--------------|
 | `cmd/sedit` | The command line: argument parsing, prompts, messages, and the commands (edit, share, import, keygen, ...). |
-| `internal/vault` | The file format (XChaCha20-Poly1305 with an Argon2id key), the per-file edit lock, atomic writes, backups. Knows nothing about prompts, editors or the Keychain. |
+| `internal/vault` | The file format (XChaCha20-Poly1305 with an Argon2id key), titles and descriptions (files', and folders' hidden label file), the per-file edit lock, atomic writes, backups. Knows nothing about prompts, editors or the Keychain. |
 | `internal/keystore` | Remembering passwords outside the files: the macOS Keychain, or nothing elsewhere. |
 | `internal/unlock` | Opening a file with whichever password is available: its own stored one, then the default, then one the caller asks the user for. |
 | `internal/editor` | Running your editor on a private temp file, with the extra protection and cues for vim. |
-| `internal/fileops` | Moving, deleting and re-keying a file together with its backup and remembered password. |
+| `internal/fileops` | Moving, deleting and re-keying a file together with its backup and remembered password; making, moving and deleting folders. |
 | `internal/clip` | The system clipboard (`pbcopy` and friends), and copying for a limited time. |
 | `internal/tui` | The terminal interface: file list, locked preview, and the dialogs. |
 | `cmd/sedit-tui` | The `sedit-tui` program: starts the interface. |

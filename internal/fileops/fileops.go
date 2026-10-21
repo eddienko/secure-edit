@@ -18,9 +18,11 @@ import (
 
 // Result describes what was done besides the file itself.
 type Result struct {
-	Backup   bool     // FILE.bak was moved or removed too
-	Entry    bool     // the remembered password was moved or removed too
-	Warnings []string // things that didn't work but didn't stop the operation
+	Backup    bool     // FILE.bak was moved or removed too
+	Entry     bool     // the remembered password was moved or removed too
+	Files     int      // for a folder: the sedit files that moved with it
+	Passwords int      // for a folder: the remembered passwords that were moved
+	Warnings  []string // things that didn't work but didn't stop the operation
 }
 
 func (r *Result) warn(format string, a ...any) {

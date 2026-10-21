@@ -52,9 +52,11 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `y` | Copy the whole text to the clipboard (unlocks first if needed). It is cleared again after 30 seconds; see **Clipboard** below. |
 | `/` | Filter the list. Type words and only the files whose title or name contain all of them (any case) stay, with the folders leading to them opened for you; searches the whole tree, up to 5000 entries. `↑` `↓` pick a match while you type, **Enter** keeps the filter and goes back to the list, **Esc** removes it (also from the list). The first match is selected, and the one you were on stays selected if it still matches. A file that was just made or moved and doesn't match clears the filter rather than disappear. |
 | `n` | New file in the selected folder. Asks for a name, a title and a description in one box (Tab and Shift-Tab move between the fields; the title and description are optional; the description can have several lines, with Enter starting a new one, and **Ctrl-S** or Enter in the name or title creates the file), then a password (the default, or one typed twice), then opens the editor. Esc cancels. A new file left empty is not created. |
-| `i` | Change the file's title and description in a similar box (asks for the password if it is locked; the text and the password are not touched, and no backup is made). |
-| `r` | Rename or move (a new name, or a path relative to the file's folder). Its `.bak` and stored password go with it. |
-| `d` | Delete, after a confirmation that defaults to Cancel. Its `.bak` and stored password go too. |
+| `N` | New folder in the selected folder. Asks for a name, a title and a description in one box, like `n`. The folder is private to you (mode 0700). |
+| `m` | Move the selected file or folder to another folder, chosen from a list (type to narrow it; the folder it is in, and for a folder itself and everything inside it, are left out). A folder moves with everything in it, and the passwords remembered for its files are re-filed. A folder can't be moved to another file system. |
+| `i` | Change the title and description of a file (in a similar box; asks for the password if it is locked; the text and the password are not touched, and no backup is made) or of a folder (no password: see below). |
+| `r` | Rename a folder (a new name; use `m` to move it), or rename or move a file (a new name, or a path relative to the file's folder). Its `.bak` and stored password go with it. |
+| `d` | Delete a file, after a confirmation that defaults to Cancel; its `.bak` and stored password go too. A folder can be deleted only when it is empty (a leftover `.DS_Store` doesn't count); otherwise the bar says what is in it. |
 | `p` | Change the file's password. |
 | `l` | Lock now. |
 | `R` | Re-read the folder from disk. |
@@ -74,6 +76,18 @@ long until it locks once the file is open. The description, if
 there is one, stays pinned above the text (up to three lines, with a rule under
 it). When the text is longer than the pane, `lines 3-16 of 60` is shown on the
 bottom border.
+
+**Folders.** A folder can have a title and description like a file, shown the same
+way: `Banking and cards  banking/` in the list, the title in the preview's title,
+the description and what is inside (`2 sedit files, 1 folder`) in the preview. They
+are kept in a small hidden file, `.sedit-folder`, inside the folder, so they move
+with it. Unlike a file's, they are not encrypted or authenticated: anyone who can
+write in the folder can change them, and they are for finding your way around, not
+for secrets. The folder you opened `sedit-tui` in can have them, but can't be
+renamed, moved or deleted from the interface. Folders are never deleted while
+they hold anything but this file, `.DS_Store` and empty lock files. The `/`
+filter matches a folder's title and name too, and shows everything in a folder that
+matches.
 
 **Locking.** Only one file is unlocked at a time. A file locks again when you move
 to another one, with `l`, when you quit, and after **2 minutes without a key

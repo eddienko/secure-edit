@@ -58,6 +58,20 @@ func (p *preview) showMessage(msg string) {
 	p.text, p.message, p.offset = nil, lines, 0
 }
 
+// showFolder shows a folder: its title and description if it has them, what is
+// in it, and the keys that act on it.
+func (p *preview) showFolder(m vault.Meta, summary, keys string) {
+	lines := []line{{"", plain}}
+	if m.Title != "" {
+		lines = append(lines, line{safeText(m.Title, false), bold}, line{"", plain})
+	}
+	if m.Description != "" {
+		lines = append(lines, line{safeText(m.Description, true), plain}, line{"", plain})
+	}
+	lines = append(lines, line{summary, bold}, line{"", plain}, line{keys, plain})
+	p.text, p.message, p.offset = nil, lines, 0
+}
+
 // showLocked shows what a locked sedit file says about itself: its title and
 // description if it has them, and that it is locked.
 func (p *preview) showLocked(m vault.Meta) {

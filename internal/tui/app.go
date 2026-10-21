@@ -61,6 +61,7 @@ type App struct {
 	visible       map[string]bool // paths shown while filtering: the matches and the folders leading to them
 	matchCount    int
 
+	busy    bool         // a folder is being moved in the background: keys are ignored
 	quiet   bool         // a file is open in memory but the preview still shows it locked (see unlockFor)
 	holder  *clip.Holder // copies to the clipboard and clears it again; made on first use
 	stopped atomic.Bool  // set when the interface has closed
@@ -168,6 +169,9 @@ func (a *App) label(e Entry) (string, tcell.Style) {
 	name := tview.Escape(safeText(e.Name, false))
 	switch e.Kind {
 	case KindDir:
+		if title := safeText(e.Meta.Title, false); title != "" {
+			return tview.Escape(title) + "  [::d]" + name + "/[::D]", bold
+		}
 		return name + "/", bold
 	case KindSedit:
 		if title := safeText(e.Meta.Title, false); title != "" {
@@ -231,8 +235,10 @@ func (a *App) rebuild(selectPath string) {
 	// A file that was just made or moved must not be hidden by the filter.
 	if a.filtering() && selectPath != "" && !a.visible[selectPath] && explicit {
 		a.filter, a.visible, a.matchCount, a.filterEditing = "", nil, 0, false
-		// The filter had been opening the folders; keep open the ones that lead
-		// to the file, or it would be somewhere in the list that isn't drawn.
+	}
+	// A file or folder that was just made or moved must be in view: open the
+	// folders that lead to it (the filter may have been opening them for us).
+	if explicit {
 		for p := filepath.Dir(selectPath); strings.HasPrefix(p, a.root) && p != a.root; p = filepath.Dir(p) {
 			a.expanded[p] = true
 		}
@@ -355,12 +361,7 @@ func (a *App) refreshPreview() {
 		a.prev.SetTitle(" No match ")
 		a.prev.showMessage("\nNothing matches \u201c" + safeText(a.filter, false) + "\u201d.\n\nThe filter looks at titles and names.\nEsc clears it; keep typing to change it.")
 	case e.Kind == KindDir:
-		a.prev.SetTitle(" " + e.Name + "/ ")
-		n := 0
-		if es, err := List(e.Path); err == nil {
-			n = len(es)
-		}
-		a.prev.showMessage(fmt.Sprintf("\n%d items.\n\nEnter opens or closes the folder.\nn creates a new file in it.", n))
+		a.showFolder(e)
 	default:
 		a.prev.SetTitle(" " + e.Name + " ")
 		a.prev.showMessage("\nNot a sedit file.\n\nTo encrypt it in place:\n  sedit --encrypt " + e.Name)
@@ -395,6 +396,9 @@ func (a *App) paneTitle(title, name, state string) string {
 			title = trimTo(title, room)
 		}
 		label = tview.Escape(title) + " · " + label
+	}
+	if state == "" {
+		return " " + label + " "
 	}
 	return " " + label + "  " + state + " "
 }
@@ -439,14 +443,16 @@ func (a *App) hintItemsFor() []string {
 	switch {
 	case !ok:
 		return []string{"n new"}
+	case e.Kind == KindDir && a.isTop(e):
+		return []string{move, "→ open", "n new file", "N new folder", "/ filter", "i info", "R refresh"}
 	case e.Kind == KindDir:
-		return []string{move, "→ open", "← close", "/ filter", "n new", "R refresh"}
+		return []string{move, "→ open", "n new file", "N new folder", "/ filter", "i info", "r rename", "m move", "d delete", "← close", "R refresh"}
 	case e.Kind != KindSedit:
 		return []string{move, "/ filter", "n new", "R refresh"}
 	case a.session != nil && !a.session.Locked() && a.session.Path == e.Path:
-		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "/ filter", "p password", "r rename", "d delete", "n new"}
+		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "/ filter", "p password", "r rename", "m move", "d delete", "n new"}
 	}
-	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "/ filter", "n new", "r rename", "d delete", "p password"}
+	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "/ filter", "n new", "r rename", "m move", "d delete", "p password"}
 }
 
 // hintsFor lays the hints out in width cells: as many as fit, in order, with
@@ -518,6 +524,9 @@ func (a *App) inMain() bool {
 
 func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 	a.last = time.Now()
+	if a.busy && ev.Key() != tcell.KeyCtrlC {
+		return nil // wait for the move to finish
+	}
 	if a.msg != "" {
 		a.msg = ""
 		a.renderStatus()
@@ -599,6 +608,10 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.editInfo()
 		case 'n':
 			a.newFile()
+		case 'N':
+			a.newFolder()
+		case 'm':
+			a.moveCurrent()
 		case 'r':
 			a.rename()
 		case 'd':
@@ -763,7 +776,8 @@ func (a *App) help() {
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
 		"i        change its title and description (they show while locked)",
 		"/        filter the list by title or name (Enter keeps it, Esc clears)",
-		"n        new file      r     rename or move      d  delete",
+		"n        new file      N     new folder          m  move to a folder",
+		"r        rename        d     delete (a folder only if empty)",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
 		"J K      scroll the text a line     PgUp PgDn  a page     Space  a page down",
@@ -776,7 +790,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 78, 26)
+	}, "\n"), 78, 27)
 }
 
 // ---- actions ------------------------------------------------------------
@@ -1029,6 +1043,10 @@ func checkLabels(title, description string) (int, error) {
 // editInfo changes the title and description of the selected file. That asks for
 // the password, like any change to the file.
 func (a *App) editInfo() {
+	if e, ok := a.current(); ok && e.Kind == KindDir {
+		a.editFolderInfo(e) // no password: a folder's labels are not encrypted
+		return
+	}
 	// Only the labels are being changed, so the preview keeps saying LOCKED
 	// (and showing the description) rather than printing the text.
 	a.unlockHidden(func(s *Session, finish func()) {
@@ -1066,8 +1084,12 @@ func (a *App) editInfo() {
 
 func (a *App) rename() {
 	e, ok := a.current()
+	if ok && e.Kind == KindDir {
+		a.renameFolder(e)
+		return
+	}
 	if !ok || e.Kind != KindSedit {
-		a.say("select a sedit file to rename", true)
+		a.say("select a sedit file or a folder to rename", true)
 		return
 	}
 	a.inputDialog("Rename or move", "New name or path:", e.Name, func(to string, ok bool) {
@@ -1092,8 +1114,12 @@ func (a *App) rename() {
 
 func (a *App) remove() {
 	e, ok := a.current()
+	if ok && e.Kind == KindDir {
+		a.removeFolder(e)
+		return
+	}
 	if !ok || e.Kind != KindSedit {
-		a.say("select a sedit file to delete", true)
+		a.say("select a sedit file or an empty folder to delete", true)
 		return
 	}
 	a.choiceDialog(fmt.Sprintf("Delete %s?\n\nIts backup and stored password\nare deleted too.\n\nThis can't be undone, and it is\nnot a secure erase: the encrypted\ndata may remain in backups.", e.Name),

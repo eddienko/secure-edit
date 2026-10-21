@@ -30,7 +30,7 @@ type Entry struct {
 	Path string
 	Kind Kind
 	Size int64
-	Meta vault.Meta // a sedit file's title and description, as the header says
+	Meta vault.Meta // the title and description: a sedit file's, from its header, or a folder's, from its label file
 }
 
 // sortKey is what the list is ordered by: the title if the file has one, since
@@ -110,6 +110,7 @@ func List(dir string) ([]Entry, error) {
 		case err != nil: // a dangling symlink, say: show it, but as "other"
 		case fi.IsDir():
 			e.Kind = KindDir
+			e.Meta = vault.ReadFolderMeta(path)
 		case fi.Mode().IsRegular():
 			e.Kind, e.Size = KindOf(path), fi.Size()
 			if e.Kind == KindSedit {
