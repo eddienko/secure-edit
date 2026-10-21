@@ -41,3 +41,26 @@ func TestKeychainStoreRoundTrip(t *testing.T) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
+
+// Has tells whether an entry exists without reading it. Uses a throwaway account
+// in the real login keychain, removed afterwards.
+func TestKeychainHas(t *testing.T) {
+	s := keychainStore{}
+	acct := fmt.Sprintf("/tmp/sedit has test %d", os.Getpid())
+	t.Cleanup(func() { s.Delete(acct) })
+	if ok, err := s.Has(acct); err != nil || ok {
+		t.Fatalf("before: %v, %v", ok, err)
+	}
+	if err := s.Set(acct, []byte("secret")); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.Has(acct); err != nil || !ok {
+		t.Fatalf("after Set: %v, %v", ok, err)
+	}
+	if err := s.Delete(acct); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.Has(acct); err != nil || ok {
+		t.Fatalf("after Delete: %v, %v", ok, err)
+	}
+}

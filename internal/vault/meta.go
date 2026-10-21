@@ -68,3 +68,38 @@ func printable(s string, newlines bool) error {
 	}
 	return nil
 }
+
+// Info describes a sedit file from its header, which needs no password.
+type Info struct {
+	Version   int    // 1, or 2 if it has a title or description
+	Passes    uint32 // Argon2id iterations
+	MemoryKiB uint32 // Argon2id memory
+	Threads   uint8
+	TextBytes int64 // the size of the text: the cipher doesn't change its length
+}
+
+// Weaker reports whether the key derivation is cheaper than what sedit uses for
+// new files, as for a file made by something else or with test settings.
+func (i Info) Weaker() bool {
+	return i.Passes < DefaultKDF.time || i.MemoryKiB < DefaultKDF.memory
+}
+
+// Describe reads the header at the start of a file. head holds at least its
+// first bytes (2400 are always enough), and size is the whole file's size, which
+// gives the length of the text. Nothing in it is vouched for until the file is
+// opened.
+func Describe(head []byte, size int64) (Info, error) {
+	h, err := parseHeader(head)
+	if err != nil {
+		return Info{}, err
+	}
+	text := size - int64(h.length) - 16 // the tag
+	if text < 0 {
+		return Info{}, errors.New("file too short, not a sedit file")
+	}
+	v := 1
+	if head[6] == versionMeta {
+		v = 2
+	}
+	return Info{Version: v, Passes: h.params.time, MemoryKiB: h.params.memory, Threads: h.params.threads, TextBytes: text}, nil
+}

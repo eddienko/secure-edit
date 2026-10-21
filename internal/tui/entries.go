@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/eddienko/secure-edit/internal/vault"
 )
@@ -30,7 +31,9 @@ type Entry struct {
 	Path string
 	Kind Kind
 	Size int64
-	Meta vault.Meta // the title and description: a sedit file's, from its header, or a folder's, from its label file
+	// ModTime is when the file last changed.
+	ModTime time.Time
+	Meta    vault.Meta // the title and description: a sedit file's, from its header, or a folder's, from its label file
 }
 
 // sortKey is what the list is ordered by: the title if the file has one, since
@@ -112,7 +115,7 @@ func List(dir string) ([]Entry, error) {
 			e.Kind = KindDir
 			e.Meta = vault.ReadFolderMeta(path)
 		case fi.Mode().IsRegular():
-			e.Kind, e.Size = KindOf(path), fi.Size()
+			e.Kind, e.Size, e.ModTime = KindOf(path), fi.Size(), fi.ModTime()
 			if e.Kind == KindSedit {
 				e.Meta = metaOf(path)
 			}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +32,9 @@ type Options struct {
 	Idle      time.Duration // auto-lock after this long without input; DefaultIdle if zero
 	TickEvery time.Duration // how often the idle timer is checked; one second if zero
 	Screen    tcell.Screen  // for tests: a simulated screen
+
+	PasswordCheckDelay time.Duration    // how long the cursor rests on a file before the Keychain is asked about it; 150ms if zero
+	Now                func() time.Time // for tests: the clock; time.Now if nil
 
 	TwoLine bool // list a file that has a title on two lines: the title, then its name
 
@@ -63,14 +67,18 @@ type App struct {
 	visible       map[string]bool // paths shown while filtering: the matches and the folders leading to them
 	matchCount    int
 
-	twoLine bool                         // the list shows a titled file on two lines (see rows.go)
-	rows    map[*tview.TreeNode]*rowText // the text of each row, in the two-line list
-	cont    map[*tview.TreeNode]string   // the guide lines to draw before a folder's children
-	painted *tview.TreeNode              // the row drawn as selected, in the two-line list
-	busy    bool                         // a folder is being moved in the background: keys are ignored
-	quiet   bool                         // a file is open in memory but the preview still shows it locked (see unlockFor)
-	holder  *clip.Holder                 // copies to the clipboard and clears it again; made on first use
-	stopped atomic.Bool                  // set when the interface has closed
+	twoLine      bool                         // the list shows a titled file on two lines (see rows.go)
+	rows         map[*tview.TreeNode]*rowText // the text of each row, in the two-line list
+	cont         map[*tview.TreeNode]string   // the guide lines to draw before a folder's children
+	painted      *tview.TreeNode              // the row drawn as selected, in the two-line list
+	pwState      map[string]pwState           // how each file will unlock, from the Keychain; see facts.go
+	checkTimer   *time.Timer                  // the Keychain question waiting for the cursor to rest
+	checks       sync.WaitGroup               // Keychain questions that are waiting or being asked
+	pendingCheck string                       // the file it is about
+	busy         bool                         // a folder is being moved in the background: keys are ignored
+	quiet        bool                         // a file is open in memory but the preview still shows it locked (see unlockFor)
+	holder       *clip.Holder                 // copies to the clipboard and clears it again; made on first use
+	stopped      atomic.Bool                  // set when the interface has closed
 }
 
 // New creates the interface for the directory root.
@@ -87,6 +95,9 @@ func New(root string, opts Options) (*App, error) {
 	}
 	if opts.TickEvery <= 0 {
 		opts.TickEvery = time.Second
+	}
+	if opts.PasswordCheckDelay <= 0 {
+		opts.PasswordCheckDelay = defaultPasswordCheckDelay
 	}
 	if opts.ClipboardTTL <= 0 {
 		opts.ClipboardTTL = DefaultClipboardTTL
@@ -106,6 +117,7 @@ func New(root string, opts Options) (*App, error) {
 		a.app.SetScreen(opts.Screen)
 	}
 
+	a.pwState = map[string]pwState{}
 	a.twoLine = opts.TwoLine
 	a.tree = tview.NewTreeView().SetGraphics(!a.twoLine).SetAlign(a.twoLine)
 	a.tree.SetBorder(true).SetTitle(" " + treeTitle(root) + " ")
@@ -147,6 +159,7 @@ func (a *App) Run() error {
 	err := a.app.Run()
 	a.stopped.Store(true)
 	a.lock() // never leave secrets behind
+	a.endChecks()
 	a.releaseClipboard()
 	return err
 }
@@ -239,7 +252,8 @@ func (a *App) fill(n *tview.TreeNode) {
 // reload rebuilds the tree from disk, keeping the folders that were open, and
 // selects selectPath if it is there (otherwise the previous selection, if any).
 func (a *App) reload(selectPath string) {
-	a.index = nil // the disk may have changed
+	a.index = nil                    // the disk may have changed
+	a.pwState = map[string]pwState{} // and so may the Keychain
 	a.rebuild(selectPath)
 }
 
@@ -378,9 +392,11 @@ func (a *App) refreshPreview() {
 	case e.Kind == KindSedit:
 		a.prev.SetTitle(a.paneTitle(e.Meta.Title, e.Name, "(locked)"))
 		a.prev.showLocked(e.Meta)
+		a.prev.setFacts(a.factsFor(e))
 	case e.Kind == KindAge:
 		a.prev.SetTitle(" " + e.Name + " ")
 		a.prev.showMessage("\nAn age-encrypted file.\n\nTo turn it into a sedit file:\n  sedit --import " + e.Name + " -i KEY")
+		a.prev.setFacts(a.factsFor(e))
 	case e.Kind == KindDir && a.filtering() && a.matchCount == 0:
 		a.prev.SetTitle(" No match ")
 		a.prev.showMessage("\nNothing matches \u201c" + safeText(a.filter, false) + "\u201d.\n\nThe filter looks at titles and names.\nEsc clears it; keep typing to change it.")
@@ -389,6 +405,7 @@ func (a *App) refreshPreview() {
 	default:
 		a.prev.SetTitle(" " + e.Name + " ")
 		a.prev.showMessage("\nNot a sedit file.\n\nTo encrypt it in place:\n  sedit --encrypt " + e.Name)
+		a.prev.setFacts(a.factsFor(e))
 	}
 }
 

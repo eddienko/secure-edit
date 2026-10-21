@@ -228,7 +228,7 @@ func TestEnterUnlocksWithAStoredPassword(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", secretText)
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 
 	h.selectFile("notes.txt")
 	h.key(tcell.KeyEnter)
@@ -281,7 +281,7 @@ func TestMovingToAnotherFileLocksTheOneYouWereReading(t *testing.T) {
 	a := seditFile(t, dir, "a.txt", "pw", secretText)
 	seditFile(t, dir, "b.txt", "pw", "second file")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, a)] = []byte("pw")
+	h.store.put(account(t, a), "pw")
 
 	h.selectFile("a.txt")
 	h.key(tcell.KeyEnter)
@@ -306,7 +306,7 @@ func TestTheIdleTimerLocksTheFile(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", secretText)
 	h := newHarness(t, dir, Options{Idle: time.Second, TickEvery: 50 * time.Millisecond})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 
 	h.selectFile("notes.txt")
 	h.key(tcell.KeyEnter)
@@ -324,7 +324,7 @@ func TestKeyPressesKeepTheFileUnlocked(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", secretText)
 	h := newHarness(t, dir, Options{Idle: time.Second, TickEvery: 50 * time.Millisecond})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	h.selectFile("notes.txt")
 	h.key(tcell.KeyEnter)
 	h.waitFor(secretText)
@@ -340,7 +340,7 @@ func TestLockKey(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", secretText)
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	h.selectFile("notes.txt")
 	h.key(tcell.KeyEnter)
 	h.waitFor(secretText)
@@ -353,7 +353,7 @@ func TestQuitWipesAndStops(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", secretText)
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	h.selectFile("notes.txt")
 	h.key(tcell.KeyEnter)
 	h.waitFor(secretText)
@@ -379,7 +379,7 @@ func TestEditingSavesAndShowsTheResult(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", "original\n")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	useEditor(t, `echo "added by the editor" >> "$1"`+"\n")
 
 	h.selectFile("notes.txt")
@@ -414,7 +414,7 @@ func TestEditingWithoutChangesSaysSo(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "notes.txt", "pw", "same\n")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	useEditor(t, "true\n")
 	h.selectFile("notes.txt")
 	h.press('e')
@@ -517,7 +517,7 @@ func TestNewFileRefusesBadNames(t *testing.T) {
 func TestNewFileOffersTheDefaultPassword(t *testing.T) {
 	dir := t.TempDir()
 	h := newHarness(t, dir, Options{})
-	h.store.m[keystore.DefaultAccount] = []byte("dpw")
+	h.store.put(keystore.DefaultAccount, "dpw")
 	useEditor(t, `echo "with the default" >> "$1"`+"\n")
 
 	h.press('n')
@@ -538,7 +538,7 @@ func TestRename(t *testing.T) {
 	path := seditFile(t, dir, "old.txt", "pw", secretText)
 	seditFile(t, dir, "old.txt.bak", "pw", "previous")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 
 	h.selectFile("old.txt")
 	h.press('r')
@@ -593,7 +593,7 @@ func TestDeleteAsksFirstAndCancelIsTheDefault(t *testing.T) {
 	path := seditFile(t, dir, "doomed.txt", "pw", secretText)
 	seditFile(t, dir, "doomed.txt.bak", "pw", "previous")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 
 	h.selectFile("doomed.txt")
 	h.press('d')
@@ -717,7 +717,7 @@ func TestTheShownTextScrollsAndWraps(t *testing.T) {
 	long.WriteString("THE VERY LAST LINE\n")
 	path := seditFile(t, dir, "long.txt", "pw", long.String())
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	h.selectFile("long.txt")
 	h.key(tcell.KeyEnter)
 	h.waitFor("line number")
@@ -739,7 +739,7 @@ func TestBinaryContentIsNotDumpedOnScreen(t *testing.T) {
 	dir := t.TempDir()
 	path := seditFile(t, dir, "blob.bin", "pw", "abc\x00\x01\x02def")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	h.selectFile("blob.bin")
 	h.key(tcell.KeyEnter)
 	h.waitFor("Binary data (9 bytes): not shown.")
@@ -855,8 +855,8 @@ func TestUsesOnlyTheTerminalsOwnColours(t *testing.T) {
 	plainFile(t, dir, "shared.age", "age-encryption.org/v1\n")
 	os.Mkdir(filepath.Join(dir, "projects"), 0o700)
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
-	h.store.m[account(t, blob)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
+	h.store.put(account(t, blob), "pw")
 
 	h.onlyTerminalColours("the file list")
 
@@ -1008,7 +1008,7 @@ func TestPopupsHideWhatIsUnderThem(t *testing.T) {
 	// A long name fills the file list with X, under the left part of the dialogs.
 	locked := seditFile(t, dir, strings.Repeat("X", 22)+".txt", "pw", "secret")
 	h := newHarness(t, dir, Options{})
-	h.store.m[account(t, path)] = []byte("pw")
+	h.store.put(account(t, path), "pw")
 	_ = locked
 
 	check := func(state string) {
@@ -1082,7 +1082,7 @@ func (f *fakeClip) Clear() error { f.mu.Lock(); defer f.mu.Unlock(); f.data = ni
 func (f *fakeClip) text() string { f.mu.Lock(); defer f.mu.Unlock(); return string(f.data) }
 
 // withFile makes a sedit file whose password is stored, so that unlocking needs no typing.
-func (h *harness) remember(path string) { h.store.m[account(h.t, path)] = []byte("pw") }
+func (h *harness) remember(path string) { h.store.put(account(h.t, path), "pw") }
 
 func TestCopyKeyCopiesTheWholeText(t *testing.T) {
 	dir := t.TempDir()

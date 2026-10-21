@@ -16,6 +16,13 @@ type Store interface {
 	Delete(account string) error // ErrNotFound if there is no entry
 }
 
+// Haser is implemented by a Store that can say whether an entry exists without
+// reading the password. On macOS that needs no approval from the Keychain, which
+// reading a password can.
+type Haser interface {
+	Has(account string) (bool, error)
+}
+
 // ErrNotFound is returned by a Store when there is no entry for an account.
 var ErrNotFound = errors.New("no stored password")
 
@@ -38,6 +45,32 @@ func GetDefault() ([]byte, error) {
 	}
 	return Backend.Get(DefaultAccount)
 }
+
+// Has reports whether there is an entry for account. A store that can't answer
+// without reading the password is asked to read it, and the copy is wiped at
+// once. It is ErrNoBackend if there is no store.
+func Has(account string) (bool, error) {
+	if Backend == nil {
+		return false, ErrNoBackend
+	}
+	if h, ok := Backend.(Haser); ok {
+		return h.Has(account)
+	}
+	pw, err := Backend.Get(account)
+	for i := range pw {
+		pw[i] = 0
+	}
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrNotFound):
+		return false, nil
+	}
+	return false, err
+}
+
+// HasDefault reports whether a default password is stored.
+func HasDefault() (bool, error) { return Has(DefaultAccount) }
 
 // Account returns the store key for path: absolute, with symlinks resolved
 // when the file exists.

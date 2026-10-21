@@ -22,6 +22,7 @@ const maxPreview = 1 << 20
 type preview struct {
 	*tview.Box
 	message []line // shown when text is nil
+	facts   []fact // shown under the message: see facts.go
 	text    []byte // not owned: it is the session's Plain
 	header  string // shown above the text, with a rule under it: the file's description
 	offset  int    // first visible row
@@ -55,7 +56,7 @@ func (p *preview) showMessage(msg string) {
 		}
 		lines = append(lines, line{l, style})
 	}
-	p.text, p.message, p.offset = nil, lines, 0
+	p.text, p.message, p.offset, p.facts = nil, lines, 0, nil
 }
 
 // showFolder shows a folder: its title and description if it has them, what is
@@ -69,8 +70,11 @@ func (p *preview) showFolder(m vault.Meta, summary, keys string) {
 		lines = append(lines, line{safeText(m.Description, true), plain}, line{"", plain})
 	}
 	lines = append(lines, line{summary, bold}, line{"", plain}, line{keys, plain})
-	p.text, p.message, p.offset = nil, lines, 0
+	p.text, p.message, p.offset, p.facts = nil, lines, 0, nil
 }
+
+// setFacts adds a block of facts under the message that is showing.
+func (p *preview) setFacts(f []fact) { p.facts = f }
 
 // showLocked shows what a locked sedit file says about itself: its title and
 // description if it has them, and that it is locked.
@@ -89,7 +93,7 @@ func (p *preview) showLocked(m vault.Meta) {
 	lines = append(lines,
 		line{"LOCKED", bold}, line{"", plain},
 		line{"Press Enter to unlock.", plain}, line{"Press e to edit.", plain})
-	p.text, p.message, p.offset = nil, lines, 0
+	p.text, p.message, p.offset, p.facts = nil, lines, 0, nil
 }
 
 // maxHeaderRows is how many rows of the description are shown above the text.
@@ -98,7 +102,7 @@ const maxHeaderRows = 3
 // showText shows decrypted text, with the file's description pinned above it if
 // header is not empty. The slice is read at every redraw, not copied.
 func (p *preview) showText(text []byte, header string) {
-	p.text, p.message, p.offset = text, nil, 0
+	p.text, p.message, p.offset, p.facts = text, nil, 0, nil
 	p.header = safeText(header, true)
 }
 
@@ -210,6 +214,7 @@ func (p *preview) Draw(screen tcell.Screen) {
 				}
 			})
 		}
+		p.drawFacts(screen, x, y+row+1, w, h-row-1)
 		return
 	}
 
@@ -272,6 +277,79 @@ func (p *preview) Draw(screen tcell.Screen) {
 		bx, by, bw, bh := p.GetRect()
 		drawText(screen, bx+bw-2-runewidth.StringWidth(label), by+bh-1, bw, label, plain)
 	}
+}
+
+// drawFacts draws the facts block in the h rows from (x, y): a rule, then each
+// fact with its label dim and its value wrapped to the width that is left. A fact
+// that doesn't fit whole is left out, and so are the ones after it, so the block
+// is complete or short, never cut in the middle of a line.
+func (p *preview) drawFacts(screen tcell.Screen, x, y, w, h int) {
+	if len(p.facts) == 0 || h < 3 || w < 20 {
+		return
+	}
+	lw := 0
+	for _, f := range p.facts {
+		if n := runewidth.StringWidth(f.Label); n > lw {
+			lw = n
+		}
+	}
+	lw += 2
+	vw := w - 2 - lw
+	if vw < 8 {
+		return
+	}
+	for i := 0; i < w; i++ {
+		screen.SetContent(x+i, y, '─', nil, dim)
+	}
+	row := 1
+	for _, f := range p.facts {
+		lines := wrapWords(safeText(f.Value, false), vw)
+		if row+len(lines) > h {
+			break
+		}
+		drawText(screen, x+1, y+row, lw, f.Label, dim)
+		for i, l := range lines {
+			drawText(screen, x+1+lw, y+row+i, vw, l, plain)
+		}
+		row += len(lines)
+	}
+}
+
+// wrapWords breaks s into lines of at most width cells, at spaces where it can.
+// A word longer than a line is cut. There is always at least one line.
+func wrapWords(s string, width int) []string {
+	var lines []string
+	cur := ""
+	flush := func() {
+		lines = append(lines, cur)
+		cur = ""
+	}
+	for _, w := range strings.Fields(s) {
+		for runewidth.StringWidth(w) > width { // too long for any line: cut it
+			if cur != "" {
+				flush()
+			}
+			head := runewidth.Truncate(w, width, "")
+			if head == "" {
+				return append(lines, w)
+			}
+			lines = append(lines, head)
+			w = strings.TrimPrefix(w, head)
+		}
+		switch {
+		case cur == "":
+			cur = w
+		case runewidth.StringWidth(cur)+1+runewidth.StringWidth(w) <= width:
+			cur += " " + w
+		default:
+			flush()
+			cur = w
+		}
+	}
+	if cur != "" || len(lines) == 0 {
+		flush()
+	}
+	return lines
 }
 
 // showsText reports whether the pane is showing text that can be scrolled.

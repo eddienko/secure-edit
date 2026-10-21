@@ -95,6 +95,32 @@ they hold anything but this file, `.DS_Store` and empty lock files. The `/`
 filter matches a folder's title and name too, and shows everything in a folder that
 matches.
 
+**What the locked preview tells you.** Under the description, a block of facts that
+need no password:
+
+```
+ Folder    work/
+ Text      1.2 KiB
+ Modified  3 days ago (18 Oct 2026, 15:48)
+ Backup    yes, from 2 days
+ Password  stored for this file
+ Format    sedit v2 · Argon2id, 3 passes, 256.0 MiB
+```
+
+*Text* is the exact size of the text (encryption doesn't change its length), and
+*Modified* and *Backup* come from the file system. *Format* is read from the
+file's header, and says so if the key derivation is weaker than `sedit`'s default,
+as for a file made with test settings or by something else. *Password* says how Enter
+will open the file: **stored for this file**, **the default password, if it fits;
+otherwise it will ask** (whether the default fits can't be known without trying it),
+or **will ask**. It is found by asking the Keychain whether an entry *exists*, never
+what it holds, so nothing is read and macOS shows no prompt. The question is asked
+in the background once the cursor has rested on the file for a moment, so scrolling
+through a list doesn't ask about every file on the way, and the answer is
+remembered until you reload with `R`. An age file shows who can open it (a
+passphrase or keys), and any other file its size and date. A file that is open, and
+a folder, show no such block.
+
 **Locking.** Only one file is unlocked at a time. A file locks again when you move
 to another one, with `l`, when you quit, and after **2 minutes without a key
 press** (change that with `--idle`, for example `--idle 30s`). Locking zeroes the

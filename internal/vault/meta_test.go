@@ -137,3 +137,71 @@ func TestSaveKeepsTheLabelsAndSaveMetaReplacesThem(t *testing.T) {
 		t.Errorf("labels after SaveMeta: %+v", m)
 	}
 }
+
+func TestDescribeGivesTheSizeOfTheText(t *testing.T) {
+	for _, m := range []Meta{{}, {Title: "T", Description: "some\ndescription"}} {
+		for _, text := range []string{"", "x", strings.Repeat("long text ", 5000)} {
+			enc, err := EncryptMeta([]byte("pw"), []byte(text), testKDF, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			head := enc
+			if len(head) > 2400 {
+				head = head[:2400] // only the start of a big file is read
+			}
+			info, err := Describe(head, int64(len(enc)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.TextBytes != int64(len(text)) {
+				t.Errorf("meta %v, %d bytes of text: described as %d", !m.IsZero(), len(text), info.TextBytes)
+			}
+			wantV := 1
+			if !m.IsZero() {
+				wantV = 2
+			}
+			if info.Version != wantV || info.Passes != 1 || info.MemoryKiB != 64 || info.Threads != 1 {
+				t.Errorf("info %+v", info)
+			}
+		}
+	}
+}
+
+func TestDescribeFlagsAWeakerKeyDerivation(t *testing.T) {
+	weak, _ := Encrypt([]byte("pw"), []byte("x"), testKDF)
+	if info, err := Describe(weak, int64(len(weak))); err != nil || !info.Weaker() {
+		t.Errorf("test settings should be weaker than the default: %+v, %v", info, err)
+	}
+	if (Info{Passes: 3, MemoryKiB: 256 * 1024}).Weaker() {
+		t.Error("the default settings are not weaker than the default")
+	}
+	if !(Info{Passes: 3, MemoryKiB: 1024}).Weaker() || !(Info{Passes: 1, MemoryKiB: 256 * 1024}).Weaker() {
+		t.Error("less memory or fewer passes is weaker")
+	}
+	if (Info{Passes: 4, MemoryKiB: 512 * 1024}).Weaker() {
+		t.Error("more of both is not weaker")
+	}
+}
+
+func TestDescribeRefusesWhatIsNotAHeader(t *testing.T) {
+	good, _ := Encrypt([]byte("pw"), []byte("x"), testKDF)
+	for name, data := range map[string][]byte{
+		"empty":     nil,
+		"plaintext": []byte("just some text, long enough to have a header's length, but it isn't one"),
+		"truncated": good[:20],
+	} {
+		if _, err := Describe(data, int64(len(data))); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	// A size smaller than the header says the file was cut short.
+	if _, err := Describe(good, 10); err == nil {
+		t.Error("a size smaller than the header was accepted")
+	}
+	// Absurd cost settings are refused as in Decrypt, not described.
+	bad := append([]byte(nil), good...)
+	bad[11], bad[12], bad[13], bad[14] = 0xff, 0xff, 0xff, 0xff
+	if _, err := Describe(bad, int64(len(bad))); err == nil {
+		t.Error("absurd memory was accepted")
+	}
+}

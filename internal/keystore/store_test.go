@@ -73,3 +73,66 @@ func TestAccount(t *testing.T) {
 		t.Error("a file account collided with the default account")
 	}
 }
+
+// hasFake is a Store that can answer Has itself, and says so.
+type hasFake struct {
+	fake
+	asked, read int
+}
+
+func (h *hasFake) Has(a string) (bool, error) { h.asked++; _, ok := h.m[a]; return ok, nil }
+func (h *hasFake) Get(a string) ([]byte, error) {
+	h.read++
+	return h.fake.Get(a)
+}
+
+func TestHasUsesTheStoresOwnAnswerWithoutReadingThePassword(t *testing.T) {
+	h := &hasFake{fake: fake{m: map[string][]byte{"/a": []byte("pw")}}}
+	withBackend(t, h)
+	if ok, err := Has("/a"); err != nil || !ok {
+		t.Errorf("stored: %v, %v", ok, err)
+	}
+	if ok, err := Has("/b"); err != nil || ok {
+		t.Errorf("not stored: %v, %v", ok, err)
+	}
+	if h.asked != 2 || h.read != 0 {
+		t.Errorf("asked %d times, read the password %d times", h.asked, h.read)
+	}
+}
+
+func TestHasFallsBackToReadingAndWipesTheCopy(t *testing.T) {
+	stored := []byte("secret")
+	f := &fake{m: map[string][]byte{"/a": stored}}
+	withBackend(t, f)
+	if ok, err := Has("/a"); err != nil || !ok {
+		t.Errorf("stored: %v, %v", ok, err)
+	}
+	if string(stored) == "secret" {
+		t.Error("the password that was read was not wiped")
+	}
+	if ok, err := Has("/nope"); err != nil || ok {
+		t.Errorf("not stored: %v, %v", ok, err)
+	}
+}
+
+func TestHasWithoutABackend(t *testing.T) {
+	withBackend(t, nil)
+	if _, err := Has("/a"); !errors.Is(err, ErrNoBackend) {
+		t.Errorf("got %v", err)
+	}
+	if _, err := HasDefault(); !errors.Is(err, ErrNoBackend) {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestHasDefault(t *testing.T) {
+	f := &fake{m: map[string][]byte{}}
+	withBackend(t, f)
+	if ok, _ := HasDefault(); ok {
+		t.Error("no default is stored")
+	}
+	f.m[DefaultAccount] = []byte("x")
+	if ok, err := HasDefault(); err != nil || !ok {
+		t.Errorf("%v, %v", ok, err)
+	}
+}

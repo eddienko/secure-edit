@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/eddienko/secure-edit/internal/fileops"
@@ -13,18 +14,38 @@ import (
 	"github.com/eddienko/secure-edit/internal/vault"
 )
 
+// fakeStore is a Keychain in memory. It is used from the interface's goroutines
+// and the test's, so it locks, and it counts what it was asked.
 type fakeStore struct {
-	m      map[string][]byte
-	setErr error
+	mu       sync.Mutex
+	m        map[string][]byte
+	setErr   error
+	gets     int      // passwords read
+	hasAsked []string // accounts asked about with Has
 }
 
 func (f *fakeStore) Get(a string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.gets++
 	if v, ok := f.m[a]; ok {
 		return append([]byte(nil), v...), nil
 	}
 	return nil, keystore.ErrNotFound
 }
+
+// Has says whether there is an entry, without reading it.
+func (f *fakeStore) Has(a string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hasAsked = append(f.hasAsked, a)
+	_, ok := f.m[a]
+	return ok, nil
+}
+
 func (f *fakeStore) Set(a string, p []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.setErr != nil {
 		return f.setErr
 	}
@@ -32,11 +53,28 @@ func (f *fakeStore) Set(a string, p []byte) error {
 	return nil
 }
 func (f *fakeStore) Delete(a string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if _, ok := f.m[a]; !ok {
 		return keystore.ErrNotFound
 	}
 	delete(f.m, a)
 	return nil
+}
+
+// put stores a password, as if it had been remembered.
+func (f *fakeStore) put(a, pw string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.m[a] = []byte(pw)
+}
+
+// asked is how many times, and about which accounts, Has was called, and how many
+// passwords were read.
+func (f *fakeStore) asked() (has []string, gets int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.hasAsked...), f.gets
 }
 
 // useStore replaces the real Keychain for the test. It must be called first in
@@ -134,20 +172,20 @@ func TestSessionTryStored(t *testing.T) {
 		t.Fatalf("nothing stored: ok=%v err=%v", ok, err)
 	}
 
-	f.m[keystore.DefaultAccount] = []byte("pw")
+	f.put(keystore.DefaultAccount, "pw")
 	s, _ = OpenSession(path)
 	if ok, _ := s.TryStored(nil); !ok || s.Src != unlock.SrcDefault || string(s.Plain) != "hello" {
 		t.Errorf("default: ok=%v src=%v", ok, s.Src)
 	}
 
-	f.m[account(t, path)] = []byte("pw")
+	f.put(account(t, path), "pw")
 	s, _ = OpenSession(path)
 	if ok, _ := s.TryStored(nil); !ok || s.Src != unlock.SrcFile {
 		t.Errorf("file entry: ok=%v src=%v", ok, s.Src)
 	}
 
 	// A stale entry is removed, and the user is told.
-	f.m[account(t, path)] = []byte("stale")
+	f.put(account(t, path), "stale")
 	delete(f.m, keystore.DefaultAccount)
 	var said []string
 	s, _ = OpenSession(path)
@@ -341,7 +379,7 @@ func TestEditorFailureChangesNothing(t *testing.T) {
 func TestRekey(t *testing.T) {
 	f := useStore(t)
 	path := seditFile(t, t.TempDir(), "a.txt", "pw", "hello")
-	f.m[account(t, path)] = []byte("pw")
+	f.put(account(t, path), "pw")
 	s, _ := OpenSession(path)
 	if ok, _ := s.TryStored(nil); !ok {
 		t.Fatal("stored password didn't unlock")
@@ -370,7 +408,7 @@ func TestRekey(t *testing.T) {
 func TestRekeyKeepsTheSessionUsableEvenIfTheKeychainFails(t *testing.T) {
 	f := useStore(t)
 	path := seditFile(t, t.TempDir(), "a.txt", "pw", "hello")
-	f.m[account(t, path)] = []byte("pw")
+	f.put(account(t, path), "pw")
 	s, _ := OpenSession(path)
 	s.TryStored(nil)
 	f.setErr = errors.New("keychain is locked")

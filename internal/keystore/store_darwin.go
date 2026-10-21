@@ -35,6 +35,20 @@ func (keychainStore) Get(account string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
 }
 
+// Has asks for the item's attributes only, never its password, so the Keychain
+// has nothing to ask the user about.
+func (keychainStore) Has(account string) (bool, error) {
+	err := exec.Command("security", "find-generic-password",
+		"-s", keychainService, "-a", account).Run()
+	switch {
+	case err == nil:
+		return true, nil
+	case isExit(err, 44):
+		return false, nil
+	}
+	return false, fmt.Errorf("keychain: %w", err)
+}
+
 func (keychainStore) Set(account string, password []byte) error {
 	cmd := exec.Command("security", "-i")
 	cmd.Stdin = strings.NewReader(fmt.Sprintf(
