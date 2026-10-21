@@ -55,6 +55,12 @@ type App struct {
 	msg      string
 	msgErr   bool
 
+	filter        string          // what the list is narrowed to; empty for the whole list
+	filterEditing bool            // the filter is being typed
+	index         []Entry         // everything under root, while filtering
+	visible       map[string]bool // paths shown while filtering: the matches and the folders leading to them
+	matchCount    int
+
 	quiet   bool         // a file is open in memory but the preview still shows it locked (see unlockFor)
 	holder  *clip.Holder // copies to the clipboard and clears it again; made on first use
 	stopped atomic.Bool  // set when the interface has closed
@@ -193,10 +199,13 @@ func (a *App) fill(n *tview.TreeNode) {
 		return
 	}
 	for _, c := range entries {
+		if a.filtering() && !a.visible[c.Path] {
+			continue
+		}
 		child := a.newNode(c)
 		a.parents[child] = n
 		n.AddChild(child)
-		if c.Kind == KindDir && a.expanded[c.Path] {
+		if c.Kind == KindDir && (a.filtering() || a.expanded[c.Path]) {
 			a.fill(child)
 			child.SetExpanded(true)
 		}
@@ -206,9 +215,26 @@ func (a *App) fill(n *tview.TreeNode) {
 // reload rebuilds the tree from disk, keeping the folders that were open, and
 // selects selectPath if it is there (otherwise the previous selection, if any).
 func (a *App) reload(selectPath string) {
+	a.index = nil // the disk may have changed
+	a.rebuild(selectPath)
+}
+
+// rebuild is reload without reading the disk again for the filter.
+func (a *App) rebuild(selectPath string) {
+	explicit := selectPath != ""
 	if selectPath == "" {
 		if e, ok := a.current(); ok {
 			selectPath = e.Path
+		}
+	}
+	a.computeVisible()
+	// A file that was just made or moved must not be hidden by the filter.
+	if a.filtering() && selectPath != "" && !a.visible[selectPath] && explicit {
+		a.filter, a.visible, a.matchCount, a.filterEditing = "", nil, 0, false
+		// The filter had been opening the folders; keep open the ones that lead
+		// to the file, or it would be somewhere in the list that isn't drawn.
+		for p := filepath.Dir(selectPath); strings.HasPrefix(p, a.root) && p != a.root; p = filepath.Dir(p) {
+			a.expanded[p] = true
 		}
 	}
 	a.parents = map[*tview.TreeNode]*tview.TreeNode{}
@@ -218,19 +244,41 @@ func (a *App) reload(selectPath string) {
 	a.tree.SetRoot(root)
 
 	target := root
+	found := false
 	root.Walk(func(n, _ *tview.TreeNode) bool {
 		if ref, ok := n.GetReference().(*Entry); ok && ref.Path == selectPath {
-			target = n
+			target, found = n, true
 			return false
 		}
 		return true
 	})
+	// When the selection has been filtered away, or is only the top folder, take
+	// the first match.
+	if (!found || target == root) && a.filtering() {
+		first := true // Walk goes on after false, so only the first one is taken
+		root.Walk(func(n, _ *tview.TreeNode) bool {
+			if ref, ok := n.GetReference().(*Entry); ok && ref.Kind != KindDir && first {
+				target, first = n, false
+			}
+			return true
+		})
+	}
 	// Walk only visits expanded nodes in a useful way; open the parents of the target.
 	for p := a.parents[target]; p != nil; p = a.parents[p] {
 		p.SetExpanded(true)
 	}
 	a.tree.SetCurrentNode(target)
+	a.updateTreeTitle()
 	a.refreshPreview()
+}
+
+// updateTreeTitle puts the filter, if there is one, in the list's title.
+func (a *App) updateTreeTitle() {
+	title := treeTitle(a.root)
+	if a.filtering() {
+		title = trimTo(title, 14) + " · /" + a.filter
+	}
+	a.tree.SetTitle(" " + tview.Escape(title) + " ")
 }
 
 func (a *App) current() (Entry, bool) {
@@ -303,6 +351,9 @@ func (a *App) refreshPreview() {
 	case e.Kind == KindAge:
 		a.prev.SetTitle(" " + e.Name + " ")
 		a.prev.showMessage("\nAn age-encrypted file.\n\nTo turn it into a sedit file:\n  sedit --import " + e.Name + " -i KEY")
+	case e.Kind == KindDir && a.filtering() && a.matchCount == 0:
+		a.prev.SetTitle(" No match ")
+		a.prev.showMessage("\nNothing matches \u201c" + safeText(a.filter, false) + "\u201d.\n\nThe filter looks at titles and names.\nEsc clears it; keep typing to change it.")
 	case e.Kind == KindDir:
 		a.prev.SetTitle(" " + e.Name + "/ ")
 		n := 0
@@ -368,24 +419,42 @@ func (a *App) hintItems() []string {
 	if a.prev.HasFocus() {
 		return []string{"↑↓ scroll", "PgUp/PgDn page", "y copy", "Esc back"}
 	}
+	if a.filtering() {
+		// The filter is on: how to change or drop it comes first.
+		items := []string{"/ edit filter (" + plural(a.matchCount, "match", "matches") + ")", "Esc clear"}
+		for _, it := range a.hintItemsFor() {
+			if it != "/ filter" { // "/ edit filter" says it already
+				items = append(items, it)
+			}
+		}
+		return items
+	}
+	return a.hintItemsFor()
+}
+
+// hintItemsFor are the hints for what is selected.
+func (a *App) hintItemsFor() []string {
 	move := "↑↓ move"
 	e, ok := a.current()
 	switch {
 	case !ok:
 		return []string{"n new"}
 	case e.Kind == KindDir:
-		return []string{move, "→ open", "← close", "n new", "R refresh"}
+		return []string{move, "→ open", "← close", "/ filter", "n new", "R refresh"}
 	case e.Kind != KindSedit:
-		return []string{move, "n new", "R refresh"}
+		return []string{move, "/ filter", "n new", "R refresh"}
 	case a.session != nil && !a.session.Locked() && a.session.Path == e.Path:
-		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "p password", "r rename", "d delete", "n new"}
+		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "/ filter", "p password", "r rename", "d delete", "n new"}
 	}
-	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "n new", "r rename", "d delete", "p password"}
+	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "/ filter", "n new", "r rename", "d delete", "p password"}
 }
 
 // hintsFor lays the hints out in width cells: as many as fit, in order, with
 // the help and quit keys always last.
 func (a *App) hintsFor(width int) string {
+	if a.filterEditing {
+		return a.filterLine()
+	}
 	text := helpTail
 	room := width - runewidth.StringWidth(helpTail) - 2
 	var items []string
@@ -456,6 +525,9 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 	if !a.inMain() {
 		return ev // a dialog is open: it handles its own keys
 	}
+	if a.filterEditing {
+		return a.filterKey(ev)
+	}
 	if a.app.GetFocus() == a.prev {
 		if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyTab {
 			a.app.SetFocus(a.tree)
@@ -468,6 +540,12 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 		return ev
 	}
 	switch ev.Key() {
+	case tcell.KeyEscape:
+		if a.filtering() {
+			a.clearFilter()
+			return nil
+		}
+		return ev
 	case tcell.KeyTab:
 		a.app.SetFocus(a.prev)
 		return nil
@@ -509,6 +587,8 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.selectEdge(false)
 		case 'q':
 			a.quit()
+		case '/':
+			a.startFilter()
 		case '?':
 			a.help()
 		case 'e':
@@ -682,6 +762,7 @@ func (a *App) help() {
 		"e        edit it in your editor (unlocks first)",
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
 		"i        change its title and description (they show while locked)",
+		"/        filter the list by title or name (Enter keeps it, Esc clears)",
 		"n        new file      r     rename or move      d  delete",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
@@ -695,7 +776,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 78, 25)
+	}, "\n"), 78, 26)
 }
 
 // ---- actions ------------------------------------------------------------
