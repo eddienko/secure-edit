@@ -1,4 +1,4 @@
-package main
+package vault
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 )
 
 // Cheap parameters so tests run fast.
-var testKDF = kdfParams{1, 64, 1}
+var testKDF = KDFParams{1, 64, 1}
 
 func TestRoundTrip(t *testing.T) {
 	pt := []byte("hunter2\nline two\n")

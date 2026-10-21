@@ -1,4 +1,8 @@
-package main
+// Package vault implements the sedit file format (authenticated encryption with
+// a key derived from a password), the per-file edit lock, and the atomic file
+// operations that go with them. It knows nothing about prompts, editors or the
+// Keychain.
+package vault
 
 import (
 	"bytes"
@@ -45,14 +49,23 @@ var magic = []byte("SEDIT\x00")
 // a wrong password from a corrupted file, by design.
 var ErrBadPassword = errors.New("wrong password or corrupted file")
 
-type kdfParams struct {
+// KDFParams are the Argon2id parameters stored in a file's header.
+type KDFParams struct {
 	time, memory uint32
 	threads      uint8
 }
 
-var defaultKDF = kdfParams{defaultT, defaultMem, defaultThr}
+// NewKDFParams returns Argon2id parameters: iterations, memory in KiB, and
+// parallelism. Files record their own parameters, so a cheap setting is useful
+// for tests; use DefaultKDF for real data.
+func NewKDFParams(time, memoryKiB uint32, threads uint8) KDFParams {
+	return KDFParams{time, memoryKiB, threads}
+}
 
-func (p kdfParams) key(password, salt []byte) []byte {
+// DefaultKDF is the Argon2id cost used for new and re-encrypted files.
+var DefaultKDF = KDFParams{defaultT, defaultMem, defaultThr}
+
+func (p KDFParams) key(password, salt []byte) []byte {
 	return argon2.IDKey(password, salt, p.time, p.memory, p.threads, keyLen)
 }
 
@@ -62,7 +75,7 @@ func IsSedit(data []byte) bool {
 }
 
 // Encrypt seals plaintext under password with a fresh salt and nonce.
-func Encrypt(password, plaintext []byte, p kdfParams) ([]byte, error) {
+func Encrypt(password, plaintext []byte, p KDFParams) ([]byte, error) {
 	header := make([]byte, 0, headerLen)
 	header = append(header, magic...)
 	header = append(header, version)
@@ -82,7 +95,7 @@ func Encrypt(password, plaintext []byte, p kdfParams) ([]byte, error) {
 	header = append(header, nonce...)
 
 	key := p.key(password, salt)
-	defer wipe(key)
+	defer Wipe(key)
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return nil, err
@@ -101,7 +114,7 @@ func Decrypt(password, data []byte) ([]byte, error) {
 	if v := data[6]; v != version {
 		return nil, fmt.Errorf("unsupported file version %d", v)
 	}
-	p := kdfParams{
+	p := KDFParams{
 		time:    binary.BigEndian.Uint32(data[7:11]),
 		memory:  binary.BigEndian.Uint32(data[11:15]),
 		threads: data[15],
@@ -113,7 +126,7 @@ func Decrypt(password, data []byte) ([]byte, error) {
 	nonce := data[16+saltLen : headerLen]
 
 	key := p.key(password, salt)
-	defer wipe(key)
+	defer Wipe(key)
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return nil, err
@@ -125,7 +138,8 @@ func Decrypt(password, data []byte) ([]byte, error) {
 	return pt, nil
 }
 
-func wipe(b []byte) {
+// Wipe zeroes b. Use it on passwords and plaintext when you are done with them.
+func Wipe(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}

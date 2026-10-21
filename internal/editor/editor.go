@@ -1,4 +1,8 @@
-package main
+// Package editor runs the user's text editor on a decrypted file: a private temp
+// file named after the real file, an editor chosen from $SEDIT_EDITOR, $VISUAL
+// and $EDITOR, and extra protection and cues for vim-family editors. The temp
+// file is zeroed and removed afterwards.
+package editor
 
 import (
 	"bytes"
@@ -10,11 +14,14 @@ import (
 	"time"
 )
 
-// runEditor writes plain to a private temp file named after the real file
-// (so editors show the right name and pick the right syntax highlighting),
-// runs the editor on it, and returns the resulting contents. The temp file is
-// zeroed and removed after.
-func runEditor(name string, plain []byte) (edited []byte, err error) {
+// Run writes plain to a private temp file named after the real file (so editors
+// show the right name and pick the right syntax highlighting), runs the editor
+// on it, and returns the resulting contents. The temp file is zeroed and removed
+// after. name is the path of the real file; only its base name is used.
+//
+// Run talks to the user on stderr (which editor was used, warnings), and the
+// editor takes over the terminal while it runs.
+func Run(name string, plain []byte) (edited []byte, err error) {
 	dir, err := os.MkdirTemp("", "sedit-") // mode 0700
 	if err != nil {
 		return nil, err

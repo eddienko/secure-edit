@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"github.com/eddienko/secure-edit/internal/keystore"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,7 +82,7 @@ func TestWriteReplacesAndKeepsBackup(t *testing.T) {
 	if got := decryptFile(t, path, "pw"); got != "new text\n" {
 		t.Errorf("got %q", got)
 	}
-	if got := decryptFile(t, backupPath(path), "pw"); got != "old text\n" {
+	if got := decryptFile(t, vault.BackupPath(path), "pw"); got != "old text\n" {
 		t.Errorf("backup holds %q", got)
 	}
 }
@@ -95,7 +97,7 @@ func TestAppend(t *testing.T) {
 	if got := decryptFile(t, path, "pw"); got != "line one\nline two\n" {
 		t.Errorf("got %q", got)
 	}
-	if got := decryptFile(t, backupPath(path), "pw"); got != "line one\n" {
+	if got := decryptFile(t, vault.BackupPath(path), "pw"); got != "line one\n" {
 		t.Errorf("backup holds %q", got)
 	}
 
@@ -156,7 +158,7 @@ func TestWriteUsesKeychainWithoutTerminal(t *testing.T) {
 
 func TestWriteNewFileWithDefaultNeedsNoTerminal(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	noTTY(t)
 	path := filepath.Join(t.TempDir(), "d.txt")
 	withStdin(t, "with the default\n")
@@ -171,7 +173,7 @@ func TestWriteNewFileWithDefaultNeedsNoTerminal(t *testing.T) {
 // The default/custom question is asked on the terminal, not on the pipe.
 func TestWriteAsksDefaultOrCustomOnTheTerminal(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	path := filepath.Join(t.TempDir(), "q.txt")
 	asked := fakeTTY(t, "c\n", "cpw", "cpw") // answers "custom", then types the password twice
 	withStdin(t, "data\n")
@@ -197,7 +199,7 @@ func TestWriteRefusesEmptyInput(t *testing.T) {
 	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
 		t.Error("the file was modified")
 	}
-	notExist(t, backupPath(path))
+	notExist(t, vault.BackupPath(path))
 }
 
 func TestWriteRefusesTerminalStdin(t *testing.T) {
@@ -300,7 +302,7 @@ func TestPlainEditWithPipedStdinWarns(t *testing.T) {
 	}
 	// A new file whose password comes from elsewhere isn't a surprise either.
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	out = captureStderr(t, func() {
 		withStdin(t, "")
 		if err := edit(filepath.Join(t.TempDir(), "d.txt"), false, choiceDefault); err != nil {

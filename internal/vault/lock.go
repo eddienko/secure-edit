@@ -1,4 +1,4 @@
-package main
+package vault
 
 import (
 	"fmt"
@@ -22,8 +22,8 @@ func (e *ErrLocked) Error() string {
 	return fmt.Sprintf("%s is being edited by another sedit", e.path)
 }
 
-// lockPath returns the sidecar lock file for path: dir/.name.lock
-func lockPath(path string) string {
+// LockPath returns the sidecar lock file for path: dir/.name.lock
+func LockPath(path string) string {
 	return filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".lock")
 }
 
@@ -32,7 +32,7 @@ func lockPath(path string) string {
 // The lock file itself is left in place on purpose: unlinking a flocked file
 // would let two processes lock different inodes under the same name.
 func Lock(path string) (unlock func(), err error) {
-	lp := lockPath(path)
+	lp := LockPath(path)
 	f, err := os.OpenFile(lp, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err

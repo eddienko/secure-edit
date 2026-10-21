@@ -12,6 +12,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
+	"github.com/eddienko/secure-edit/internal/keystore"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -330,7 +331,7 @@ func TestImportBadInputs(t *testing.T) {
 
 func TestImportUsesDefaultPassword(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	dir := t.TempDir()
 	id, _ := age.GenerateX25519Identity()
 	idFile := writeFile(t, filepath.Join(dir, "key.txt"), []byte(id.String()+"\n"))

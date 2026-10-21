@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/eddienko/secure-edit/internal/editor"
+	"github.com/eddienko/secure-edit/internal/keystore"
+	"github.com/eddienko/secure-edit/internal/unlock"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"golang.org/x/term"
 )
 
@@ -77,7 +80,7 @@ func run(args []string) error {
 		return nil
 	}
 	if o.file != "" {
-		if o.file, err = resolvePath(o.file); err != nil {
+		if o.file, err = vault.ResolvePath(o.file); err != nil {
 			return err
 		}
 	}
@@ -116,18 +119,18 @@ func run(args []string) error {
 }
 
 func edit(path string, remember bool, choice pwChoice) (err error) {
-	if remember && store == nil {
-		return errNoStore
+	if remember && keystore.Backend == nil {
+		return keystore.ErrNoBackend
 	}
-	unlock, err := Lock(path)
+	release, err := vault.Lock(path)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 
 	data, err := os.ReadFile(path)
 	var password, plain []byte
-	src := srcPrompt
+	src := unlock.SrcPrompt
 	switch {
 	case errors.Is(err, fs.ErrNotExist), err == nil && len(data) == 0:
 		// New or empty file: start fresh, and there's nothing to back up.
@@ -151,21 +154,21 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 			return err
 		}
 	}
-	defer wipe(password)
-	defer wipe(plain)
+	defer vault.Wipe(password)
+	defer vault.Wipe(plain)
 	defer func() {
 		if err == nil && remember {
-			if err = storePassword(path, password); err == nil {
+			if err = unlock.StorePassword(path, password); err == nil {
 				fmt.Fprintln(os.Stderr, "sedit: password remembered in Keychain")
 			}
 		}
 	}()
 
-	edited, err := runEditor(path, plain)
+	edited, err := editor.Run(path, plain)
 	if err != nil {
 		return err
 	}
-	defer wipe(edited)
+	defer vault.Wipe(edited)
 	if data != nil && bytes.Equal(plain, edited) {
 		fmt.Fprintf(os.Stderr, "sedit: no changes to %s\n", path)
 		return nil
@@ -175,18 +178,8 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 
 // saveFile encrypts content under password and writes it to path. prev is the
 // existing ciphertext, kept as FILE.bak, or nil for a new file.
-func saveFile(path string, password, content, prev []byte, src pwSource) error {
-	out, err := Encrypt(password, content, defaultKDF)
-	if err != nil {
-		return err
-	}
-	if prev != nil {
-		// prev is the previous ciphertext, so the backup is encrypted too.
-		if err := writeAtomic(backupPath(path), prev); err != nil {
-			return fmt.Errorf("writing backup: %w", err)
-		}
-	}
-	if err := writeAtomic(path, out); err != nil {
+func saveFile(path string, password, content, prev []byte, src unlock.Source) error {
+	if err := vault.Save(path, password, content, prev); err != nil {
 		return err
 	}
 	verb := "saved"
@@ -197,92 +190,31 @@ func saveFile(path string, password, content, prev []byte, src pwSource) error {
 	return nil
 }
 
-var errNoStore = errors.New("storing passwords isn't supported on this platform")
-
-// pwSource says where the password used to open a file came from.
-type pwSource int
-
-const (
-	srcPrompt  pwSource = iota // typed by the user
-	srcFile                    // the file's own Keychain entry
-	srcDefault                 // the shared default password
-)
-
-// note describes the source for the user, or "" if it's unremarkable.
-func (s pwSource) note() string {
-	switch s {
-	case srcFile:
-		return "password from Keychain"
-	case srcDefault:
-		return "default password from Keychain"
-	}
-	return ""
-}
-
 // report tells the user what happened to path, e.g.
 // "sedit: saved notes.txt (encrypted; password from Keychain)".
-func report(verb, path string, src pwSource) {
+func report(verb, path string, src unlock.Source) {
 	detail := "encrypted"
-	if n := src.note(); n != "" {
+	if n := src.Note(); n != "" {
 		detail += "; " + n
 	}
 	fmt.Fprintf(os.Stderr, "sedit: %s %s (%s)\n", verb, path, detail)
 }
 
-// openExisting decrypts data, using the file's stored password, then the default
-// password, then prompting. A stored password that no longer works is removed.
-func openExisting(path string, data []byte) (password, plain []byte, src pwSource, err error) {
-	if store != nil {
-		if acct, aerr := account(path); aerr == nil {
-			pw, gerr := store.Get(acct)
-			switch {
-			case gerr == nil:
-				if plain, err = Decrypt(pw, data); err == nil {
-					return pw, plain, srcFile, nil
-				}
-				wipe(pw)
-				if !errors.Is(err, ErrBadPassword) {
-					return nil, nil, srcPrompt, err
-				}
-				store.Delete(acct)
-				fmt.Fprintln(os.Stderr, "sedit: stored password no longer works; removed it")
-			case !errors.Is(gerr, ErrNotFound):
-				fmt.Fprintln(os.Stderr, "sedit: can't read stored password:", gerr)
-			}
-		}
-	}
-	if pw, pt, ok, derr := tryDefault(data); derr != nil {
-		return nil, nil, srcPrompt, derr
-	} else if ok {
-		return pw, pt, srcDefault, nil
-	}
-	if password, err = prompt("Password: "); err != nil {
-		return nil, nil, srcPrompt, err
-	}
-	if plain, err = Decrypt(password, data); err != nil {
-		wipe(password)
-		return nil, nil, srcPrompt, err
-	}
-	return password, plain, srcPrompt, nil
-}
-
-func storePassword(path string, password []byte) error {
-	acct, err := account(path)
-	if err != nil {
-		return err
-	}
-	return store.Set(acct, password)
+// openExisting decrypts data with the file's stored password, then the default
+// password, and failing that asks on the prompt.
+func openExisting(path string, data []byte) (password, plain []byte, src unlock.Source, err error) {
+	return unlock.Open(path, data, prompt, func(msg string) { fmt.Fprintln(os.Stderr, "sedit:", msg) })
 }
 
 func forget(path string) error {
-	if store == nil {
-		return errNoStore
+	if keystore.Backend == nil {
+		return keystore.ErrNoBackend
 	}
-	acct, err := account(path)
+	acct, err := keystore.Account(path)
 	if err != nil {
 		return err
 	}
-	if err := store.Delete(acct); errors.Is(err, ErrNotFound) {
+	if err := keystore.Backend.Delete(acct); errors.Is(err, keystore.ErrNotFound) {
 		return fmt.Errorf("no stored password for %s", path)
 	} else if err != nil {
 		return err
@@ -291,11 +223,9 @@ func forget(path string) error {
 	return nil
 }
 
-func backupPath(path string) string { return path + ".bak" }
-
 // requireSedit fails early, before any password prompt, if data isn't a sedit file.
 func requireSedit(path string, data []byte) error {
-	if IsSedit(data) {
+	if vault.IsSedit(data) {
 		return nil
 	}
 	return fmt.Errorf("%s is not a sedit file (use \"sedit --encrypt %s\" to convert a plaintext file)", path, path)
@@ -303,18 +233,18 @@ func requireSedit(path string, data []byte) error {
 
 // encrypt converts an existing plaintext file to a sedit file in place.
 func encrypt(path string, yes bool, choice pwChoice) error {
-	unlock, err := Lock(path)
+	release, err := vault.Lock(path)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 
 	plain, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	defer wipe(plain)
-	if IsSedit(plain) {
+	defer vault.Wipe(plain)
+	if vault.IsSedit(plain) {
 		return fmt.Errorf("%s is already a sedit file", path)
 	}
 	if len(plain) == 0 {
@@ -329,13 +259,13 @@ func encrypt(path string, yes bool, choice pwChoice) error {
 	if err != nil {
 		return err
 	}
-	defer wipe(password)
-	out, err := Encrypt(password, plain, defaultKDF)
+	defer vault.Wipe(password)
+	out, err := vault.Encrypt(password, plain, vault.DefaultKDF)
 	if err != nil {
 		return err
 	}
 	// No .bak here: it would be a copy of the plaintext.
-	if err := writeAtomic(path, out); err != nil {
+	if err := vault.WriteAtomic(path, out); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "sedit: encrypted %s\n", path)
@@ -366,18 +296,18 @@ func print(path string) error {
 	if err != nil {
 		return err
 	}
-	defer wipe(password)
-	defer wipe(plain)
+	defer vault.Wipe(password)
+	defer vault.Wipe(plain)
 	_, err = os.Stdout.Write(plain)
 	return err
 }
 
 func passwd(path string, choice pwChoice) error {
-	unlock, err := Lock(path)
+	release, err := vault.Lock(path)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -390,59 +320,30 @@ func passwd(path string, choice pwChoice) error {
 	if err != nil {
 		return err
 	}
-	defer wipe(old)
-	defer wipe(plain)
+	defer vault.Wipe(old)
+	defer vault.Wipe(plain)
 	password, err := newPassword(choice)
 	if err != nil {
 		return err
 	}
-	defer wipe(password)
-	out, err := Encrypt(password, plain, defaultKDF)
+	defer vault.Wipe(password)
+	out, err := vault.Encrypt(password, plain, vault.DefaultKDF)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(backupPath(path)); err == nil {
-		fmt.Fprintf(os.Stderr, "warning: %s is still encrypted with the old password\n", backupPath(path))
+	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
+		fmt.Fprintf(os.Stderr, "warning: %s is still encrypted with the old password\n", vault.BackupPath(path))
 	}
-	if err := writeAtomic(path, out); err != nil {
+	if err := vault.WriteAtomic(path, out); err != nil {
 		return err
 	}
-	if src == srcFile {
-		if err := storePassword(path, password); err != nil {
+	if src == unlock.SrcFile {
+		if err := unlock.StorePassword(path, password); err != nil {
 			return fmt.Errorf("password changed, but updating the stored one failed (run \"sedit --forget %s\"): %w", path, err)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "sedit: password changed for %s\n", path)
 	return nil
-}
-
-// writeAtomic writes data next to path and renames it into place.
-func writeAtomic(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".sedit-*")
-	if err != nil {
-		return err
-	}
-	name := f.Name()
-	defer os.Remove(name) // no-op after a successful rename
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	mode := fs.FileMode(0o600)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	if err := os.Chmod(name, mode); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
 }
 
 func prompt(msg string) ([]byte, error) {
@@ -523,7 +424,7 @@ func promptNew() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer wipe(b)
+	defer vault.Wipe(b)
 	if !bytes.Equal(a, b) {
 		return nil, errors.New("passwords don't match")
 	}

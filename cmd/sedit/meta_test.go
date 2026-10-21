@@ -1,9 +1,9 @@
 package main
 
 import (
+	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -16,29 +16,6 @@ func TestVersionString(t *testing.T) {
 	defer func() { buildVersion = old }()
 	if got := versionString(); got != "v9.9.9" {
 		t.Fatalf("got %q", got)
-	}
-}
-
-func TestResolvePath(t *testing.T) {
-	dir, _ := filepath.EvalSymlinks(t.TempDir())
-	real := filepath.Join(dir, "real")
-	os.WriteFile(real, []byte("x"), 0o600)
-	link := filepath.Join(dir, "link")
-	os.Symlink("real", link) // relative target
-	dangling := filepath.Join(dir, "dangling")
-	os.Symlink("nowhere", dangling)
-
-	for path, want := range map[string]string{
-		real:                         real,
-		link:                         real,
-		filepath.Join(dir, "absent"): filepath.Join(dir, "absent"),
-	} {
-		if got, err := resolvePath(path); err != nil || got != want {
-			t.Errorf("%s: got %q, %v; want %q", path, got, err, want)
-		}
-	}
-	if _, err := resolvePath(dangling); err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Errorf("dangling: got %v", err)
 	}
 }
 
@@ -70,13 +47,13 @@ func TestRunThroughSymlink(t *testing.T) {
 	if got := decryptFile(t, real, "pw"); got != "one\ntwo\n" {
 		t.Fatalf("target not updated: %q", got)
 	}
-	if _, err := os.Stat(backupPath(real)); err != nil {
+	if _, err := os.Stat(vault.BackupPath(real)); err != nil {
 		t.Fatal("backup missing next to target")
 	}
-	if _, err := os.Lstat(backupPath(link)); err == nil {
+	if _, err := os.Lstat(vault.BackupPath(link)); err == nil {
 		t.Fatal("backup created next to the link")
 	}
-	if _, err := os.Stat(lockPath(link)); err == nil {
+	if _, err := os.Stat(vault.LockPath(link)); err == nil {
 		t.Fatal("lock created for the link name")
 	}
 }

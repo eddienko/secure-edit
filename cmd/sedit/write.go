@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/eddienko/secure-edit/internal/unlock"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"io"
 	"io/fs"
 	"os"
@@ -21,7 +23,7 @@ func writeStdin(path string, appendMode bool, choice pwChoice) error {
 	if err != nil {
 		return err
 	}
-	defer wipe(input)
+	defer vault.Wipe(input)
 	if len(input) > maxImportSize {
 		return fmt.Errorf("input is larger than %d MiB", maxImportSize>>20)
 	}
@@ -41,15 +43,15 @@ func writeStdin(path string, appendMode bool, choice pwChoice) error {
 		defer func() { promptTTY = nil; tty.Close() }()
 	}
 
-	unlock, err := Lock(path)
+	release, err := vault.Lock(path)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 
 	prev, err := os.ReadFile(path)
 	var password, plain []byte
-	src := srcPrompt
+	src := unlock.SrcPrompt
 	switch {
 	case errors.Is(err, fs.ErrNotExist), err == nil && len(prev) == 0:
 		prev = nil // new or empty file: nothing to back up
@@ -66,13 +68,13 @@ func writeStdin(path string, appendMode bool, choice pwChoice) error {
 			return err
 		}
 	}
-	defer wipe(password)
-	defer wipe(plain)
+	defer vault.Wipe(password)
+	defer vault.Wipe(plain)
 
 	content := input
 	if appendMode {
 		content = append(bytes.Clone(plain), input...)
-		defer wipe(content)
+		defer vault.Wipe(content)
 	}
 	return saveFile(path, password, content, prev, src)
 }

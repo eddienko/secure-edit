@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/eddienko/secure-edit/internal/keystore"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
 	"strings"
 )
-
-// defaultAccount is the store key for the shared default password. It can't
-// collide with a file entry, because those are absolute paths.
-const defaultAccount = "<default>"
 
 // pwChoice says which password a new file (or a re-keyed one) should get.
 type pwChoice int
@@ -23,22 +21,14 @@ const (
 
 var errNoDefault = errors.New(`no default password set (run "sedit --set-default")`)
 
-// getDefault returns the stored default, or ErrNotFound / errNoStore.
-func getDefault() ([]byte, error) {
-	if store == nil {
-		return nil, errNoStore
-	}
-	return store.Get(defaultAccount)
-}
-
 // newPassword picks the password for a new or re-keyed file.
 func newPassword(choice pwChoice) ([]byte, error) {
 	switch choice {
 	case choiceCustom:
 		return promptNew()
 	case choiceDefault:
-		pw, err := getDefault()
-		if errors.Is(err, ErrNotFound) {
+		pw, err := keystore.GetDefault()
+		if errors.Is(err, keystore.ErrNotFound) {
 			return nil, errNoDefault
 		}
 		return pw, err
@@ -46,8 +36,8 @@ func newPassword(choice pwChoice) ([]byte, error) {
 	// Ask only if there is a default to choose, and a terminal to ask on.
 	// Otherwise (including scripts) use a custom password, so the default is
 	// never picked up by accident.
-	pw, err := getDefault()
-	wipe(pw)
+	pw, err := keystore.GetDefault()
+	vault.Wipe(pw)
 	tty, ok := promptTerminal()
 	if err != nil || !ok {
 		return promptNew()
@@ -58,7 +48,7 @@ func newPassword(choice pwChoice) ([]byte, error) {
 		line, err := in.ReadString('\n')
 		if c, ok := parseChoice(line); ok {
 			if c == choiceDefault {
-				return getDefault()
+				return keystore.GetDefault()
 			}
 			return promptNew()
 		}
@@ -79,40 +69,18 @@ func parseChoice(line string) (pwChoice, bool) {
 	return choiceAsk, false
 }
 
-// tryDefault opens data with the stored default. It reports ok=false, without
-// error, if there is no default or it doesn't fit this file. The default is
-// never removed: it belongs to many files, not just this one.
-func tryDefault(data []byte) (password, plain []byte, ok bool, err error) {
-	pw, err := getDefault()
-	if err != nil {
-		if !errors.Is(err, ErrNotFound) && !errors.Is(err, errNoStore) {
-			fmt.Fprintln(os.Stderr, "sedit: can't read default password:", err)
-		}
-		return nil, nil, false, nil
-	}
-	plain, err = Decrypt(pw, data)
-	if err == nil {
-		return pw, plain, true, nil
-	}
-	wipe(pw)
-	if errors.Is(err, ErrBadPassword) {
-		return nil, nil, false, nil // normal for files with a custom password
-	}
-	return nil, nil, false, err
-}
-
 func setDefault() error {
-	if store == nil {
-		return errNoStore
+	if keystore.Backend == nil {
+		return keystore.ErrNoBackend
 	}
-	old, getErr := getDefault()
-	wipe(old)
+	old, getErr := keystore.GetDefault()
+	vault.Wipe(old)
 	pw, err := promptNew()
 	if err != nil {
 		return err
 	}
-	defer wipe(pw)
-	if err := store.Set(defaultAccount, pw); err != nil {
+	defer vault.Wipe(pw)
+	if err := keystore.Backend.Set(keystore.DefaultAccount, pw); err != nil {
 		return err
 	}
 	if getErr == nil {
@@ -122,10 +90,10 @@ func setDefault() error {
 }
 
 func forgetDefault() error {
-	if store == nil {
-		return errNoStore
+	if keystore.Backend == nil {
+		return keystore.ErrNoBackend
 	}
-	if err := store.Delete(defaultAccount); errors.Is(err, ErrNotFound) {
+	if err := keystore.Backend.Delete(keystore.DefaultAccount); errors.Is(err, keystore.ErrNotFound) {
 		return errNoDefault
 	} else if err != nil {
 		return err

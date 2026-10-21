@@ -12,6 +12,7 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/armor"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"golang.org/x/term"
 )
 
@@ -133,8 +134,8 @@ func share(path string, recips []age.Recipient, out string, armored bool) error 
 	if err != nil {
 		return err
 	}
-	defer wipe(password)
-	defer wipe(plain)
+	defer vault.Wipe(password)
+	defer vault.Wipe(plain)
 
 	var buf bytes.Buffer
 	var dst io.Writer = &buf
@@ -166,7 +167,7 @@ func share(path string, recips []age.Recipient, out string, armored bool) error 
 		fmt.Fprintf(os.Stderr, "sedit: shared %s with %s (written to stdout)\n", path, plural(len(recips), "recipient"))
 		return nil
 	}
-	if err := writeAtomic(out, buf.Bytes()); err != nil {
+	if err := vault.WriteAtomic(out, buf.Bytes()); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "sedit: shared %s with %s: %s\n  they can decrypt it with: age -d -i <their key> %s\n",

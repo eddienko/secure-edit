@@ -1,4 +1,4 @@
-package main
+package editor
 
 import (
 	"os"
@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// captureStderr runs f and returns what it wrote to os.Stderr.
-func captureStderr(t *testing.T, f func()) string {
+// capture runs f and returns what it wrote to os.Stderr.
+func capture(t *testing.T, f func()) string {
 	t.Helper()
 	tmp, err := os.CreateTemp(t.TempDir(), "stderr")
 	if err != nil {
@@ -21,6 +21,25 @@ func captureStderr(t *testing.T, f func()) string {
 	f()
 	b, _ := os.ReadFile(tmp.Name())
 	return string(b)
+}
+
+// script writes an executable shell script and returns its path.
+func script(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// useEditor points sedit at an editor and clears the other settings.
+func useEditor(t *testing.T, ed string) {
+	t.Helper()
+	t.Setenv("SEDIT_EDITOR", ed)
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	t.Setenv("SEDIT_STATUSLINE", "")
 }
 
 func TestTempName(t *testing.T) {
@@ -97,119 +116,6 @@ func TestVimTitleWithAwkwardNames(t *testing.T) {
 			t.Errorf("%q: got %q, want %q", name, b, want)
 		}
 	}
-}
-
-// The editor must see a file named after the real one, not a generic name.
-func TestEditorSeesRealFileName(t *testing.T) {
-	useFakeStore(t)
-	dir := t.TempDir()
-	seen := filepath.Join(dir, "seen")
-	script := filepath.Join(dir, "ed.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\nbasename \"$1\" > "+seen+"\necho x >> \"$1\"\n"), 0o755)
-	t.Setenv("EDITOR", script)
-	t.Setenv("VISUAL", "")
-
-	withStdin(t, "pw\n")
-	if err := edit(filepath.Join(dir, "notes.md"), false, choiceAsk); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(seen); strings.TrimSpace(string(b)) != "notes.md" {
-		t.Fatalf("editor saw %q", b)
-	}
-}
-
-func TestMessages(t *testing.T) {
-	fs := useFakeStore(t)
-	appendEditor(t, "one")
-	path := filepath.Join(t.TempDir(), "secrets")
-
-	out := captureStderr(t, func() {
-		withStdin(t, "pw\n")
-		if err := edit(path, true, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-	})
-	for _, want := range []string{"created " + path + " (encrypted)", "password remembered in Keychain"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in %q", want, out)
-		}
-	}
-
-	appendEditor(t, "two")
-	out = captureStderr(t, func() {
-		withStdin(t, "")
-		if err := edit(path, false, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if want := "saved " + path + " (encrypted; password from Keychain)"; !strings.Contains(out, want) {
-		t.Errorf("missing %q in %q", want, out)
-	}
-
-	// no changes
-	script := filepath.Join(t.TempDir(), "noop.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\ntrue\n"), 0o755)
-	t.Setenv("EDITOR", script)
-	out = captureStderr(t, func() {
-		withStdin(t, "")
-		if err := edit(path, false, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "no changes to "+path) {
-		t.Errorf("got %q", out)
-	}
-
-	// default password
-	delete(fs.m, mustAccount(t, path))
-	fs.m[defaultAccount] = []byte("dpw")
-	d := filepath.Join(t.TempDir(), "d")
-	appendEditor(t, "one")
-	withStdin(t, "")
-	if err := edit(d, false, choiceDefault); err != nil {
-		t.Fatal(err)
-	}
-	appendEditor(t, "two")
-	out = captureStderr(t, func() {
-		withStdin(t, "")
-		if err := edit(d, false, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if want := "(encrypted; default password from Keychain)"; !strings.Contains(out, want) {
-		t.Errorf("missing %q in %q", want, out)
-	}
-
-	// passwd and encrypt
-	out = captureStderr(t, func() {
-		withStdin(t, "newpw\n")
-		if err := passwd(d, choiceCustom); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "password changed for "+d) {
-		t.Errorf("got %q", out)
-	}
-	plain := filepath.Join(t.TempDir(), "plain.txt")
-	os.WriteFile(plain, []byte("hello"), 0o600)
-	out = captureStderr(t, func() {
-		withStdin(t, "pw\n")
-		if err := encrypt(plain, true, choiceCustom); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, "encrypted "+plain) {
-		t.Errorf("got %q", out)
-	}
-}
-
-func mustAccount(t *testing.T, path string) string {
-	t.Helper()
-	a, err := account(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return a
 }
 
 // runVim runs vim headless with sedit's args and script on a throwaway file,
@@ -395,15 +301,147 @@ func TestFallbackEditor(t *testing.T) {
 	}
 }
 
+func TestStatuslineEnabled(t *testing.T) {
+	for val, want := range map[string]bool{
+		"": true, "1": true, "yes": true, "on": true, "anything": true,
+		"0": false, "false": false, "FALSE": false, "no": false, "Off": false, " 0 ": false,
+	} {
+		t.Setenv("SEDIT_STATUSLINE", val)
+		if got := statuslineEnabled(); got != want {
+			t.Errorf("SEDIT_STATUSLINE=%q: got %v, want %v", val, got, want)
+		}
+	}
+}
+
+func TestRunReturnsWhatTheEditorWrote(t *testing.T) {
+	useEditor(t, script(t, t.TempDir(), "ed.sh", "echo appended >> \"$1\"\n"))
+	got, err := Run("notes.md", []byte("original\n"))
+	if err != nil || string(got) != "original\nappended\n" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
+// The editor must see a file named after the real one, not a generic name.
+func TestRunNamesTheTempFileAfterTheRealFile(t *testing.T) {
+	dir := t.TempDir()
+	seen := filepath.Join(dir, "seen")
+	useEditor(t, script(t, dir, "ed.sh", "basename \"$1\" > "+seen+"\necho x >> \"$1\"\n"))
+	if _, err := Run(filepath.Join(dir, "some", "dir", "notes.md"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(seen); strings.TrimSpace(string(b)) != "notes.md" {
+		t.Fatalf("editor saw %q", b)
+	}
+}
+
+func TestRunTempFileIsPrivateAndRemoved(t *testing.T) {
+	dir := t.TempDir()
+	info := filepath.Join(dir, "info")
+	// "ls -ld" prints the same permission string on macOS and Linux (macOS may
+	// append "@"), so the first ten characters are portable.
+	useEditor(t, script(t, dir, "ed.sh",
+		"d=$(dirname \"$1\")\nls -ld \"$1\" | cut -c1-10 > "+info+"\nls -ld \"$d\" | cut -c1-10 >> "+info+"\necho \"$d\" >> "+info+"\necho x >> \"$1\"\n"))
+	if _, err := Run("notes.md", []byte("secret\n")); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Fields(mustRead(t, info))
+	if len(lines) != 3 {
+		t.Fatalf("unexpected info %q", lines)
+	}
+	if lines[0] != "-rw-------" || lines[1] != "drwx------" {
+		t.Errorf("file %s, directory %s; want -rw------- and drwx------", lines[0], lines[1])
+	}
+	if _, err := os.Stat(lines[2]); err == nil {
+		t.Errorf("the temp directory %s still exists", lines[2])
+	}
+}
+
+func mustRead(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestRunEditorFailureReturnsAnError(t *testing.T) {
+	useEditor(t, script(t, t.TempDir(), "ed.sh", "echo partial >> \"$1\"\nexit 3\n"))
+	got, err := Run("notes.md", []byte("keep\n"))
+	if err == nil || !strings.Contains(err.Error(), "editor failed") || got != nil {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
+func TestStatuslineOptOut(t *testing.T) {
+	// With SEDIT_STATUSLINE=0 no vim script is written and -S isn't passed. The
+	// editor here is a script, so look at the temp directory it was given.
+	for _, tc := range []struct {
+		env     string
+		wantVim bool
+	}{{"", true}, {"0", false}} {
+		dir := t.TempDir()
+		seen := filepath.Join(dir, "seen")
+		// Run only writes sedit.vim for vim-family editors' benefit but writes it
+		// whenever the banner is enabled, so a listing shows whether it did.
+		useEditor(t, script(t, dir, "ed.sh", "ls \"$(dirname \"$1\")\" > "+seen+"\necho x >> \"$1\"\n"))
+		t.Setenv("SEDIT_STATUSLINE", tc.env)
+		if _, err := Run("notes.md", nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(mustRead(t, seen), "sedit.vim"); got != tc.wantVim {
+			t.Errorf("SEDIT_STATUSLINE=%q: vim script present = %v, want %v", tc.env, got, tc.wantVim)
+		}
+	}
+
+	t.Setenv("SEDIT_EDITOR", "vim")
+	t.Setenv("SEDIT_STATUSLINE", "0")
+	if got := strings.Join(mustCmd("notes.md", ""), " "); strings.Contains(got, "-S") || !strings.Contains(got, "titlestring") {
+		t.Errorf("opt-out args: %q", got)
+	}
+}
+
+// An editor that detaches (like "code" without --wait) must not go unnoticed.
+func TestRunFastExitWithoutChangesWarns(t *testing.T) {
+	dir := t.TempDir()
+	useEditor(t, script(t, dir, "detach.sh", "( sleep 1; echo x >> \"$1\" ) &\nexit 0\n"))
+	var edited []byte
+	out := capture(t, func() {
+		var err error
+		if edited, err = Run("notes.md", []byte("same\n")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if string(edited) != "same\n" {
+		t.Errorf("edited = %q", edited)
+	}
+	for _, want := range []string{"warning: the editor exited after", "code --wait"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %q", want, out)
+		}
+	}
+}
+
+// An editor that exits quickly but did change the file is fine: no warning.
+func TestRunFastExitWithChangesDoesNotWarn(t *testing.T) {
+	useEditor(t, script(t, t.TempDir(), "ed.sh", "echo one >> \"$1\"\n"))
+	out := capture(t, func() {
+		if _, err := Run("notes.md", nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "the editor exited") {
+		t.Errorf("unexpected fast-exit warning: %q", out)
+	}
+}
+
 // End to end: with VISUAL=code sedit must not run "code" at all, but use vim.
 // PATH holds only fake editors, so no real editor is started.
-func TestVisualGUIEditorIsIgnoredEndToEnd(t *testing.T) {
-	useFakeStore(t)
+func TestRunIgnoresAGraphicalEditorFromVisual(t *testing.T) {
 	bin := t.TempDir()
 	marks := t.TempDir()
 	fake := func(name string) {
-		body := "#!/bin/sh\nfor last; do :; done\necho " + name + " >> " + filepath.Join(marks, name) + "\necho x >> \"$last\"\n"
-		os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755)
+		script(t, bin, name, "for last; do :; done\necho "+name+" >> "+filepath.Join(marks, name)+"\necho x >> \"$last\"\n")
 	}
 	fake("code")
 	fake("vim")
@@ -415,9 +453,8 @@ func TestVisualGUIEditorIsIgnoredEndToEnd(t *testing.T) {
 	// 1. VISUAL=code: ignored, vim is used, and the user is told.
 	t.Setenv("VISUAL", "code")
 	t.Setenv("SEDIT_EDITOR", "")
-	out := captureStderr(t, func() {
-		withStdin(t, "pw\n")
-		if err := edit(filepath.Join(t.TempDir(), "a.txt"), false, choiceAsk); err != nil {
+	out := capture(t, func() {
+		if _, err := Run("a.txt", nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -431,9 +468,8 @@ func TestVisualGUIEditorIsIgnoredEndToEnd(t *testing.T) {
 	// 2. SEDIT_EDITOR=code: explicit, so it is used (with --wait).
 	os.Remove(filepath.Join(marks, "vim"))
 	t.Setenv("SEDIT_EDITOR", "code")
-	out = captureStderr(t, func() {
-		withStdin(t, "pw\n")
-		if err := edit(filepath.Join(t.TempDir(), "b.txt"), false, choiceAsk); err != nil {
+	out = capture(t, func() {
+		if _, err := Run("b.txt", nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -442,42 +478,5 @@ func TestVisualGUIEditorIsIgnoredEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(out, `using "code --wait"`) || strings.Contains(out, "ignoring") {
 		t.Errorf("unexpected output %q", out)
-	}
-}
-
-// An editor that detaches (like "code" without --wait) must not go unnoticed.
-func TestFastExitWithoutChangesWarns(t *testing.T) {
-	useFakeStore(t)
-	dir := t.TempDir()
-	script := filepath.Join(dir, "detach.sh")
-	os.WriteFile(script, []byte("#!/bin/sh\n( sleep 1; echo x >> \"$1\" ) &\nexit 0\n"), 0o755)
-	t.Setenv("EDITOR", script)
-	t.Setenv("VISUAL", "")
-
-	out := captureStderr(t, func() {
-		withStdin(t, "pw\n")
-		if err := edit(filepath.Join(dir, "notes.md"), false, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-	})
-	for _, want := range []string{"warning: the editor exited after", "code --wait"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in %q", want, out)
-		}
-	}
-}
-
-// An editor that exits quickly but did change the file is fine: no warning.
-func TestFastExitWithChangesDoesNotWarn(t *testing.T) {
-	useFakeStore(t)
-	appendEditor(t, "one") // appends and exits at once
-	out := captureStderr(t, func() {
-		withStdin(t, "pw\n")
-		if err := edit(filepath.Join(t.TempDir(), "notes.md"), false, choiceAsk); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if strings.Contains(out, "the editor exited") {
-		t.Errorf("unexpected fast-exit warning: %q", out)
 	}
 }

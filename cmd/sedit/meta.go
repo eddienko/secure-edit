@@ -1,9 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"runtime/debug"
 )
 
@@ -41,25 +38,4 @@ func versionString() string {
 		rev = rev[:7]
 	}
 	return "dev-" + rev + dirty
-}
-
-// resolvePath follows a symlink to the real file, so locking, backups and the
-// atomic rename all act on the target instead of replacing the link. Paths
-// that don't exist yet are returned unchanged.
-func resolvePath(path string) (string, error) {
-	fi, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return path, nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		return path, nil
-	}
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", fmt.Errorf("%s is a symlink whose target can't be resolved: %w", path, err)
-	}
-	return real, nil
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/eddienko/secure-edit/internal/keystore"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,7 +16,7 @@ func decryptFile(t *testing.T, path, pw string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Decrypt([]byte(pw), data)
+	got, err := vault.Decrypt([]byte(pw), data)
 	if err != nil {
 		t.Fatalf("decrypt with %q: %v", pw, err)
 	}
@@ -23,7 +25,7 @@ func decryptFile(t *testing.T, path, pw string) string {
 
 func TestNewFileWithDefaultFlag(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "f")
 	withStdin(t, "") // no typing needed
@@ -37,7 +39,7 @@ func TestNewFileWithDefaultFlag(t *testing.T) {
 
 func TestNewFileWithCustomFlag(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "f")
 	withStdin(t, "cpw\n")
@@ -49,7 +51,7 @@ func TestNewFileWithCustomFlag(t *testing.T) {
 
 func TestAskWithoutTerminalUsesCustom(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "f")
 	withStdin(t, "cpw\n") // stdin isn't a terminal
@@ -75,7 +77,7 @@ func TestDefaultFlagWithoutDefault(t *testing.T) {
 
 func TestOpenFallsBackToDefault(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "f")
 	withStdin(t, "")
@@ -94,7 +96,7 @@ func TestOpenFallsBackToDefault(t *testing.T) {
 
 func TestSensitiveFileKeepsDefault(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "f")
 	withStdin(t, "cpw\n")
@@ -106,7 +108,7 @@ func TestSensitiveFileKeepsDefault(t *testing.T) {
 	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
-	if string(fs.m[defaultAccount]) != "dpw" {
+	if string(fs.m[keystore.DefaultAccount]) != "dpw" {
 		t.Fatal("default was removed or changed")
 	}
 	if got := decryptFile(t, path, "cpw"); got != "one\ntwo\n" {
@@ -122,7 +124,7 @@ func TestFileEntryBeatsDefault(t *testing.T) {
 	if err := edit(path, true, choiceCustom); err != nil {
 		t.Fatal(err)
 	}
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "two")
 	withStdin(t, "")
 	if err := edit(path, false, choiceAsk); err != nil {
@@ -133,7 +135,7 @@ func TestFileEntryBeatsDefault(t *testing.T) {
 
 func TestPasswdSwitchesToDefault(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	appendEditor(t, "one")
 	path := filepath.Join(t.TempDir(), "f")
 	withStdin(t, "cpw\n")
@@ -149,7 +151,7 @@ func TestPasswdSwitchesToDefault(t *testing.T) {
 
 func TestEncryptWithDefault(t *testing.T) {
 	fs := useFakeStore(t)
-	fs.m[defaultAccount] = []byte("dpw")
+	fs.m[keystore.DefaultAccount] = []byte("dpw")
 	path := filepath.Join(t.TempDir(), "notes.txt")
 	os.WriteFile(path, []byte("plain\n"), 0o600)
 	withStdin(t, "")
@@ -167,8 +169,8 @@ func TestSetAndForgetDefault(t *testing.T) {
 	if err := setDefault(); err != nil {
 		t.Fatal(err)
 	}
-	if string(fs.m[defaultAccount]) != "dpw" {
-		t.Fatalf("got %q", fs.m[defaultAccount])
+	if string(fs.m[keystore.DefaultAccount]) != "dpw" {
+		t.Fatalf("got %q", fs.m[keystore.DefaultAccount])
 	}
 	if err := forgetDefault(); err != nil {
 		t.Fatal(err)
@@ -179,9 +181,9 @@ func TestSetAndForgetDefault(t *testing.T) {
 }
 
 func TestDefaultWithoutStore(t *testing.T) {
-	old := store
-	store = nil
-	defer func() { store = old }()
+	old := keystore.Backend
+	keystore.Backend = nil
+	defer func() { keystore.Backend = old }()
 	if err := setDefault(); err == nil {
 		t.Fatal("setDefault should fail")
 	}

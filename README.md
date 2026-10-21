@@ -553,6 +553,22 @@ go vet ./...
 go test ./...
 ```
 
+### Project layout
+
+The command line is a thin layer over a few small packages, so that other front
+ends can reuse them:
+
+| Package | What it does |
+|---------|--------------|
+| `cmd/sedit` | The command line: argument parsing, prompts, messages, and the commands (edit, share, import, keygen, ...). |
+| `internal/vault` | The file format (XChaCha20-Poly1305 with an Argon2id key), the per-file edit lock, atomic writes, backups. Knows nothing about prompts, editors or the Keychain. |
+| `internal/keystore` | Remembering passwords outside the files: the macOS Keychain, or nothing elsewhere. |
+| `internal/unlock` | Opening a file with whichever password is available: its own stored one, then the default, then one the caller asks the user for. |
+| `internal/editor` | Running your editor on a private temp file, with the extra protection and cues for vim. |
+
+`vault`, `keystore` and `editor` don't depend on each other; `unlock` uses
+`keystore` and `vault`.
+
 ### Publishing a new version
 
 Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)

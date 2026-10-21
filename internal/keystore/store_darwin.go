@@ -1,6 +1,6 @@
 //go:build darwin
 
-package main
+package keystore
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ const keychainService = "sedit"
 // sent to security over stdin so they never appear in the process list.
 type keychainStore struct{}
 
-func newStore() PasswordStore { return keychainStore{} }
+func newStore() Store { return keychainStore{} }
 
 func (keychainStore) Get(account string) ([]byte, error) {
 	out, err := exec.Command("security", "find-generic-password",

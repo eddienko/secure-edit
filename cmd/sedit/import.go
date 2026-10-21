@@ -11,6 +11,7 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 	"filippo.io/age/armor"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -30,11 +31,11 @@ func importFile(path string, identityFiles []string, out string, choice pwChoice
 	if err != nil {
 		return err
 	}
-	unlock, err := Lock(out)
+	release, err := vault.Lock(out)
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer release()
 	if _, err := os.Lstat(out); err == nil {
 		return fmt.Errorf("refusing to overwrite %s", out)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -91,18 +92,18 @@ func importFile(path string, identityFiles []string, out string, choice pwChoice
 	if err != nil {
 		return fmt.Errorf("decrypting %s failed (corrupted or truncated?): %w", path, err)
 	}
-	defer wipe(plain)
+	defer vault.Wipe(plain)
 
 	password, err := newPassword(choice)
 	if err != nil {
 		return err
 	}
-	defer wipe(password)
-	enc, err := Encrypt(password, plain, defaultKDF)
+	defer vault.Wipe(password)
+	enc, err := vault.Encrypt(password, plain, vault.DefaultKDF)
 	if err != nil {
 		return err
 	}
-	if err := writeAtomic(out, enc); err != nil {
+	if err := vault.WriteAtomic(out, enc); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "sedit: imported %s as %s (encrypted with a new password)\n", path, out)
@@ -146,7 +147,7 @@ func loadIdentities(files []string) ([]age.Identity, error) {
 			continue
 		}
 		parsed, err := age.ParseIdentities(bytes.NewReader(data))
-		wipe(data)
+		vault.Wipe(data)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -193,7 +194,7 @@ func (passphraseIdentity) Unwrap(stanzas []*age.Stanza) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer wipe(pass)
+	defer vault.Wipe(pass)
 	id, err := age.NewScryptIdentity(string(pass))
 	if err != nil {
 		return nil, err

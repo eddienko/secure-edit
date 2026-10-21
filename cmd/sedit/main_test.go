@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"github.com/eddienko/secure-edit/internal/keystore"
+	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,8 +25,8 @@ func withStdin(t *testing.T, input string) {
 }
 
 func TestIsSedit(t *testing.T) {
-	enc, _ := Encrypt([]byte("pw"), []byte("x"), testKDF)
-	if !IsSedit(enc) || IsSedit([]byte("hello")) || IsSedit(nil) {
+	enc, _ := vault.Encrypt([]byte("pw"), []byte("x"), vault.DefaultKDF)
+	if !vault.IsSedit(enc) || vault.IsSedit([]byte("hello")) || vault.IsSedit(nil) {
 		t.Fatal("IsSedit wrong")
 	}
 }
@@ -37,11 +39,11 @@ func TestEncryptConvertsPlaintext(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	got, err := Decrypt([]byte("pw"), data)
+	got, err := vault.Decrypt([]byte("pw"), data)
 	if err != nil || string(got) != "my secret\n" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	if _, err := os.Stat(backupPath(path)); err == nil {
+	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
 		t.Fatal("plaintext backup was created")
 	}
 }
@@ -50,7 +52,7 @@ func TestEncryptRefusals(t *testing.T) {
 	dir := t.TempDir()
 
 	already := filepath.Join(dir, "already")
-	enc, _ := Encrypt([]byte("pw"), []byte("x"), testKDF)
+	enc, _ := vault.Encrypt([]byte("pw"), []byte("x"), vault.DefaultKDF)
 	os.WriteFile(already, enc, 0o600)
 	if err := encrypt(already, true, choiceAsk); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Fatalf("want already-sedit error, got %v", err)
@@ -101,11 +103,11 @@ func TestEditTreatsEmptyFileAsNew(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	got, err := Decrypt([]byte("pw"), data)
+	got, err := vault.Decrypt([]byte("pw"), data)
 	if err != nil || string(got) != "hello\n" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	if _, err := os.Stat(backupPath(path)); err == nil {
+	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
 		t.Fatal("backup of empty file was created")
 	}
 }
@@ -116,12 +118,12 @@ func (f *fakeStore) Get(a string) ([]byte, error) {
 	if pw, ok := f.m[a]; ok {
 		return bytes.Clone(pw), nil
 	}
-	return nil, ErrNotFound
+	return nil, keystore.ErrNotFound
 }
 func (f *fakeStore) Set(a string, pw []byte) error { f.m[a] = bytes.Clone(pw); return nil }
 func (f *fakeStore) Delete(a string) error {
 	if _, ok := f.m[a]; !ok {
-		return ErrNotFound
+		return keystore.ErrNotFound
 	}
 	delete(f.m, a)
 	return nil
@@ -130,9 +132,9 @@ func (f *fakeStore) Delete(a string) error {
 func useFakeStore(t *testing.T) *fakeStore {
 	t.Helper()
 	fs := &fakeStore{m: map[string][]byte{}}
-	old := store
-	store = fs
-	t.Cleanup(func() { store = old })
+	old := keystore.Backend
+	keystore.Backend = fs
+	t.Cleanup(func() { keystore.Backend = old })
 	return fs
 }
 
@@ -154,7 +156,7 @@ func TestRememberThenUseStoredPassword(t *testing.T) {
 	if err := edit(path, true, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
-	acct, _ := account(path) // resolved only once the file exists
+	acct, _ := keystore.Account(path) // resolved only once the file exists
 	if string(fs.m[acct]) != "pw" {
 		t.Fatalf("password not stored: %q", fs.m[acct])
 	}
@@ -166,7 +168,7 @@ func TestRememberThenUseStoredPassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if got, err := Decrypt([]byte("pw"), data); err != nil || string(got) != "one\ntwo\n" {
+	if got, err := vault.Decrypt([]byte("pw"), data); err != nil || string(got) != "one\ntwo\n" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
@@ -192,7 +194,7 @@ func TestStaleStoredPasswordIsRemoved(t *testing.T) {
 	if err := edit(path, false, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
-	acct, _ := account(path)
+	acct, _ := keystore.Account(path)
 	fs.m[acct] = []byte("old-password")
 
 	withStdin(t, "pw\n") // falls back to prompting
@@ -213,7 +215,7 @@ func TestPasswdUpdatesStoredPassword(t *testing.T) {
 	if err := edit(path, true, choiceAsk); err != nil {
 		t.Fatal(err)
 	}
-	acct, _ := account(path)
+	acct, _ := keystore.Account(path)
 
 	withStdin(t, "newpw\n") // old password comes from the store
 	if err := passwd(path, choiceAsk); err != nil {
@@ -223,7 +225,7 @@ func TestPasswdUpdatesStoredPassword(t *testing.T) {
 		t.Fatalf("stored password not updated: %q", fs.m[acct])
 	}
 	data, _ := os.ReadFile(path)
-	if _, err := Decrypt([]byte("newpw"), data); err != nil {
+	if _, err := vault.Decrypt([]byte("newpw"), data); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -231,7 +233,7 @@ func TestPasswdUpdatesStoredPassword(t *testing.T) {
 func TestForget(t *testing.T) {
 	fs := useFakeStore(t)
 	path := filepath.Join(t.TempDir(), "secrets")
-	acct, _ := account(path)
+	acct, _ := keystore.Account(path)
 	fs.m[acct] = []byte("pw")
 	if err := forget(path); err != nil {
 		t.Fatal(err)
@@ -242,9 +244,9 @@ func TestForget(t *testing.T) {
 }
 
 func TestRememberWithoutStore(t *testing.T) {
-	old := store
-	store = nil
-	defer func() { store = old }()
+	old := keystore.Backend
+	keystore.Backend = nil
+	defer func() { keystore.Backend = old }()
 	if err := edit("whatever", true, choiceAsk); err == nil {
 		t.Fatal("expected error")
 	}
