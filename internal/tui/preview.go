@@ -2,11 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"
+
+	"github.com/eddienko/secure-edit/internal/vault"
 )
 
 // maxPreview is how much of a file is shown; the rest is cut off with a note.
@@ -18,12 +21,19 @@ const maxPreview = 1 << 20
 // copied into the UI library's buffers.
 type preview struct {
 	*tview.Box
-	message string // shown when text is nil
+	message []line // shown when text is nil
 	text    []byte // not owned: it is the session's Plain
 	offset  int    // first visible row
 	rows    int    // total rows at the last width
 	width   int
 	height  int
+}
+
+// line is a paragraph of a message: it is wrapped to the width, and may have
+// line breaks in it.
+type line struct {
+	text  string
+	style tcell.Style
 }
 
 func newPreview() *preview {
@@ -32,14 +42,44 @@ func newPreview() *preview {
 	return p
 }
 
-// showMessage replaces the pane's content with a message.
+// showMessage replaces the pane's content with a message. Its first line that
+// isn't empty is the headline.
 func (p *preview) showMessage(msg string) {
-	p.text, p.message, p.offset = nil, msg, 0
+	var lines []line
+	headline := true
+	for _, l := range strings.Split(msg, "\n") {
+		style := plain
+		if headline && l != "" {
+			style, headline = bold, false
+		}
+		lines = append(lines, line{l, style})
+	}
+	p.text, p.message, p.offset = nil, lines, 0
+}
+
+// showLocked shows what a locked sedit file says about itself: its title and
+// description if it has them, and that it is locked.
+func (p *preview) showLocked(m vault.Meta) {
+	if m.IsZero() {
+		p.showMessage("\nLOCKED\n\nPress Enter to unlock.\nPress e to edit.")
+		return
+	}
+	lines := []line{{"", plain}}
+	if m.Title != "" {
+		lines = append(lines, line{safeText(m.Title, false), bold}, line{"", plain})
+	}
+	if m.Description != "" {
+		lines = append(lines, line{safeText(m.Description, true), plain}, line{"", plain})
+	}
+	lines = append(lines,
+		line{"LOCKED", bold}, line{"", plain},
+		line{"Press Enter to unlock.", plain}, line{"Press e to edit.", plain})
+	p.text, p.message, p.offset = nil, lines, 0
 }
 
 // showText shows decrypted text. The slice is read at every redraw, not copied.
 func (p *preview) showText(text []byte) {
-	p.text, p.message, p.offset = text, "", 0
+	p.text, p.message, p.offset = text, nil, 0
 }
 
 // looksBinary reports whether data should be treated as binary rather than text.
@@ -134,22 +174,21 @@ func (p *preview) Draw(screen tcell.Screen) {
 	}
 
 	if p.text == nil {
-		// The first line of text is the headline.
-		line, row, headline := "", 0, true
-		for _, r := range p.message + "\n" {
-			if r == '\n' {
-				style := plain
-				if headline && line != "" {
-					style, headline = bold, false
-				}
-				drawText(screen, x+1, y+row, w-2, line, style)
-				line, row = "", row+1
-				if row >= h {
-					break
-				}
+		row := 0
+		for _, l := range p.message {
+			if row >= h {
+				break
+			}
+			if l.text == "" {
+				row++
 				continue
 			}
-			line += string(r)
+			top := row
+			row += layout([]byte(l.text), w-2, func(r, c int, ch rune) {
+				if top+r < h {
+					screen.SetContent(x+1+c, y+top+r, ch, nil, l.style)
+				}
+			})
 		}
 		return
 	}

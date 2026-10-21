@@ -563,3 +563,39 @@ func TestRekeyReportsAStoreFailureButRekeys(t *testing.T) {
 		t.Errorf("the file was not re-keyed: %q %v", got, err)
 	}
 }
+
+func TestRekeyKeepsTheLabelsAndSetMetaChangesThem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	m := vault.Meta{Title: "Router", Description: "admin page"}
+	if err := vault.SaveMeta(path, []byte("old"), []byte("text"), nil, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Rekey(path, []byte("text"), []byte("new"), false); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if got, _ := vault.ReadMeta(data); got != m {
+		t.Errorf("labels after Rekey: %+v", got)
+	}
+	if pt, err := vault.Decrypt([]byte("new"), data); err != nil || string(pt) != "text" {
+		t.Errorf("Rekey: %q, %v", pt, err)
+	}
+
+	m2 := vault.Meta{Title: "Router 2"}
+	if err := SetMeta(path, []byte("text"), []byte("new"), m2); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if got, _ := vault.ReadMeta(data); got != m2 {
+		t.Errorf("labels after SetMeta: %+v", got)
+	}
+	if pt, err := vault.Decrypt([]byte("new"), data); err != nil || string(pt) != "text" {
+		t.Errorf("SetMeta changed the text: %q, %v", pt, err)
+	}
+	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
+		t.Error("SetMeta made a backup")
+	}
+	if err := SetMeta(path, []byte("text"), []byte("new"), vault.Meta{Title: "a\nb"}); err == nil {
+		t.Error("SetMeta accepted a title with a newline")
+	}
+}

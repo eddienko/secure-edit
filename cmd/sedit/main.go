@@ -21,6 +21,9 @@ const usage = `usage:
   sedit [--default|--custom] FILE
                           edit FILE (created if it doesn't exist or is empty)
   sedit -p FILE           decrypt FILE to stdout
+  sedit --info FILE       show FILE's title and description (no password needed)
+  sedit --set-info FILE [--title TEXT] [--description TEXT]
+                          change FILE's title and description
   sedit [--default|--custom] --passwd FILE
                           change FILE's password
   sedit [--default|--custom] --encrypt [-y] FILE
@@ -45,6 +48,10 @@ const usage = `usage:
   sedit --version         show the version
 
 --default/--custom choose the password for a new file without asking.
+--title and --description give a file you create (FILE, --encrypt, --write,
+--append, --import) a title and description. They are stored in the clear, so
+they can be shown without the password (sedit-tui does): don't put secrets in
+them. Files that have them need sedit 1.4 or newer.
 --write and --append take the data from stdin and ask for the password on the
 terminal (or use the Keychain); they never overwrite a file with empty input.
 --share encrypts a copy to age (age1...) or SSH public keys; OUT defaults to
@@ -91,7 +98,14 @@ func run(args []string) error {
 			return err
 		}
 	}
+	if err := setCreateMeta(o); err != nil {
+		return err
+	}
 	switch o.mode {
+	case "info":
+		return info(o.file)
+	case "set-info":
+		return setInfo(o.file, o.title, o.description)
 	case "edit":
 		return edit(o.file, false, o.choice)
 	case "remember":
@@ -190,7 +204,13 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 // saveFile encrypts content under password and writes it to path. prev is the
 // existing ciphertext, kept as FILE.bak, or nil for a new file.
 func saveFile(path string, password, content, prev []byte, src unlock.Source) error {
-	if err := vault.Save(path, password, content, prev); err != nil {
+	var err error
+	if prev == nil {
+		err = vault.SaveMeta(path, password, content, nil, createMeta)
+	} else {
+		err = vault.Save(path, password, content, prev)
+	}
+	if err != nil {
 		return err
 	}
 	verb := "saved"
@@ -271,7 +291,7 @@ func encrypt(path string, yes bool, choice pwChoice) error {
 		return err
 	}
 	defer vault.Wipe(password)
-	out, err := vault.Encrypt(password, plain, vault.DefaultKDF)
+	out, err := vault.EncryptMeta(password, plain, vault.DefaultKDF, createMeta)
 	if err != nil {
 		return err
 	}

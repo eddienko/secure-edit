@@ -54,6 +54,7 @@ type App struct {
 	msg      string
 	msgErr   bool
 
+	quiet   bool         // a file is open in memory but the preview still shows it locked (see unlockFor)
 	holder  *clip.Holder // copies to the clipboard and clears it again; made on first use
 	stopped atomic.Bool  // set when the interface has closed
 }
@@ -150,16 +151,25 @@ func treeTitle(root string) string {
 
 // ---- the file tree ------------------------------------------------------
 
+// label is how an entry appears in the list. Names and titles come from the
+// disk, so they are escaped: tview would take a "[red]" in them for a style.
+// A file with a title is listed by it, with the file's name after it in dim
+// text so that it can still be told apart on disk; "dim" is an attribute, so it
+// follows the terminal's colours like everything else.
 func (a *App) label(e Entry) (string, tcell.Style) {
+	name := tview.Escape(safeText(e.Name, false))
 	switch e.Kind {
 	case KindDir:
-		return e.Name + "/", bold
+		return name + "/", bold
 	case KindSedit:
-		return "▪ " + e.Name, plain
+		if title := safeText(e.Meta.Title, false); title != "" {
+			return "▪ " + tview.Escape(title) + "  [::d]" + name + "[::D]", plain
+		}
+		return "▪ " + name, plain
 	case KindAge:
-		return "○ " + e.Name, plain
+		return "○ " + name, plain
 	}
-	return "· " + e.Name, plain
+	return "· " + name, plain
 }
 
 func (a *App) newNode(e Entry) *tview.TreeNode {
@@ -287,7 +297,7 @@ func (a *App) refreshPreview() {
 		a.showSession(a.session)
 	case e.Kind == KindSedit:
 		a.prev.SetTitle(" " + e.Name + "  (locked) ")
-		a.prev.showMessage("\nLOCKED\n\nPress Enter to unlock.\nPress e to edit.")
+		a.prev.showLocked(e.Meta)
 	case e.Kind == KindAge:
 		a.prev.SetTitle(" " + e.Name + " ")
 		a.prev.showMessage("\nAn age-encrypted file.\n\nTo turn it into a sedit file:\n  sedit --import " + e.Name + " -i KEY")
@@ -310,7 +320,7 @@ func (a *App) showSession(s *Session) {
 }
 
 func (a *App) updateTitle() {
-	if a.session == nil || a.session.Locked() {
+	if a.session == nil || a.session.Locked() || a.quiet {
 		return
 	}
 	left := a.opts.Idle - time.Since(a.last)
@@ -332,7 +342,7 @@ func (a *App) say(msg string, isErr bool) {
 	a.renderStatus()
 }
 
-const hints = "↑↓ move  ⏎ unlock  e edit  y copy  n new  r rename  d delete  p password  l lock  ? help  q quit"
+const hints = "↑↓ move  ⏎ unlock  e edit  y copy  i info  n new  r rename  d delete  p password  l lock  ? help  q quit"
 
 func (a *App) renderStatus() {
 	switch {
@@ -429,6 +439,8 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.editCurrent()
 		case 'y':
 			a.copyCurrent()
+		case 'i':
+			a.editInfo()
 		case 'n':
 			a.newFile()
 		case 'r':
@@ -593,6 +605,7 @@ func (a *App) help() {
 		"Enter    unlock and show the file",
 		"e        edit it in your editor (unlocks first)",
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
+		"i        change its title and description (they show while locked)",
 		"n        new file      r     rename or move      d  delete",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
@@ -605,14 +618,20 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 72, 23)
+	}, "\n"), 72, 24)
 }
 
 // ---- actions ------------------------------------------------------------
 
 // unlockCurrent makes the selected sedit file the unlocked one, using a stored
 // password if there is one and asking otherwise, then calls then.
-func (a *App) unlockCurrent(then func(*Session)) {
+func (a *App) unlockCurrent(then func(*Session)) { a.unlockFor(true, then) }
+
+// unlockFor is unlockCurrent, where reveal says whether the preview should show
+// the text once the file is open. An action that needs the file open but has
+// nothing to do with its text (changing the title, say) passes false, and puts
+// the lock back itself when it is done.
+func (a *App) unlockFor(reveal bool, then func(*Session)) {
 	e, ok := a.current()
 	if !ok || e.Kind != KindSedit {
 		a.say("select a sedit file first", true)
@@ -634,14 +653,35 @@ func (a *App) unlockCurrent(then func(*Session)) {
 		a.say(err.Error(), true)
 	case ok:
 		a.session = s
-		a.showSession(s) // whatever happens next, the pane must not still say LOCKED
+		if reveal {
+			a.showSession(s) // whatever happens next, the pane must not still say LOCKED
+		}
 		then(s)
 	default:
-		a.askPassword(s, "", then)
+		a.askPassword(s, "", reveal, then)
 	}
 }
 
-func (a *App) askPassword(s *Session, errMsg string, then func(*Session)) {
+// unlockHidden opens the selected file in memory for an action that has nothing
+// to do with its text, without putting the text in the preview, which keeps
+// saying LOCKED. then gets a finish function to call when it is done with the
+// session, which locks the file again; if the file was already open on screen it
+// is left that way.
+func (a *App) unlockHidden(then func(s *Session, finish func())) {
+	e, _ := a.current()
+	wasShown := a.session != nil && !a.session.Locked() && a.session.Path == e.Path
+	a.unlockFor(wasShown, func(s *Session) {
+		a.quiet = !wasShown
+		then(s, func() {
+			if !wasShown {
+				a.quiet = false
+				a.lock()
+			}
+		})
+	})
+}
+
+func (a *App) askPassword(s *Session, errMsg string, reveal bool, then func(*Session)) {
 	a.secretDialog("Unlock "+filepath.Base(s.Path), "Password:", errMsg, func(pw []byte, ok bool) {
 		if !ok {
 			return
@@ -649,14 +689,16 @@ func (a *App) askPassword(s *Session, errMsg string, then func(*Session)) {
 		if err := s.UnlockWith(pw); err != nil {
 			vault.Wipe(pw)
 			if errors.Is(err, vault.ErrBadPassword) {
-				a.askPassword(s, "Wrong password, try again", then)
+				a.askPassword(s, "Wrong password, try again", reveal, then)
 				return
 			}
 			a.say(err.Error(), true)
 			return
 		}
 		a.session = s
-		a.showSession(s)
+		if reveal {
+			a.showSession(s)
+		}
 		then(s)
 	})
 }
@@ -762,33 +804,105 @@ func (a *App) releaseClipboard() {
 	}
 }
 
-// newFile asks for a name and a password, then opens the editor on an empty file.
+// labelsHint is at the bottom of the dialogs that ask for a title and
+// description.
+const labelsHint = "Title and description are visible while locked: keep secrets out of them.\n" +
+	"In the description Enter starts a new line; Ctrl-S saves from any field."
+
+// descriptionLines is how tall the description box is. It scrolls.
+const descriptionLines = 4
+
+// newFile asks for a name, a title and a description in one box, then a password,
+// then opens the editor on an empty file.
 func (a *App) newFile() {
 	dir := a.targetDir()
-	a.inputDialog("New file in "+filepath.Base(dir), "Name:", "", func(name string, ok bool) {
-		name = strings.TrimSpace(name)
-		switch {
-		case !ok || name == "":
-			return
-		case name != filepath.Base(name) || name == "." || name == "..":
-			a.say("give a file name, not a path (move it afterwards with r)", true)
-			return
-		case strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".bak"):
-			a.say("names starting with . or ending in .bak are hidden from the list", true)
-			return
-		}
-		path := filepath.Join(dir, name)
-		if _, err := os.Lstat(path); err == nil {
-			a.say(name+" already exists", true)
-			return
-		}
-		a.choosePassword(func(pw []byte, ok bool) {
+	a.fieldsDialog("newfile", "New file in "+filepath.Base(dir)+"  (Tab: next, Ctrl-S: create, Esc: cancel)", labelsHint,
+		[]formField{{Label: "Name:"}, {Label: "Title:"}, {Label: "Description:", Lines: descriptionLines}},
+		func(v []string) (int, error) {
+			name := strings.TrimSpace(v[0])
+			switch {
+			case name == "":
+				return 0, errors.New("give the file a name")
+			case name != filepath.Base(name) || name == "." || name == "..":
+				return 0, errors.New("give a file name, not a path (move it afterwards with r)")
+			case strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".bak"):
+				return 0, errors.New("names starting with . or ending in .bak are hidden from the list")
+			}
+			if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+				return 0, errors.New(name + " already exists")
+			}
+			return checkLabels(v[1], v[2])
+		},
+		func(v []string, ok bool) {
 			if !ok {
 				return
 			}
-			a.lock()
-			a.runEditor(NewSession(path, pw), path)
+			path := filepath.Join(dir, strings.TrimSpace(v[0]))
+			m := labelsFrom(v[1], v[2])
+			a.choosePassword(func(pw []byte, ok bool) {
+				if !ok {
+					return
+				}
+				a.lock()
+				s := NewSession(path, pw)
+				s.NewMeta = m
+				a.runEditor(s, path)
+			})
 		})
+}
+
+// labelsFrom makes a title and description from what was typed in the dialog.
+func labelsFrom(title, description string) vault.Meta {
+	return vault.Meta{Title: title, Description: description}.Clean()
+}
+
+// checkLabels says which of the title (field 1) and description (field 2) typed
+// in a dialog is not acceptable, and why.
+func checkLabels(title, description string) (int, error) {
+	if err := (vault.Meta{Title: title}).Clean().Validate(); err != nil {
+		return 1, err
+	}
+	if err := labelsFrom("", description).Validate(); err != nil {
+		return 2, err
+	}
+	return 0, nil
+}
+
+// editInfo changes the title and description of the selected file. That asks for
+// the password, like any change to the file.
+func (a *App) editInfo() {
+	// Only the labels are being changed, so the preview keeps saying LOCKED
+	// (and showing the description) rather than printing the text.
+	a.unlockHidden(func(s *Session, finish func()) {
+		old := s.Meta()
+		name := filepath.Base(s.Path)
+		a.fieldsDialog("info", "Title and description of "+name+"  (Ctrl-S: save, Esc: cancel)", labelsHint,
+			[]formField{{Label: "Title:", Initial: old.Title}, {Label: "Description:", Initial: old.Description, Lines: descriptionLines}},
+			func(v []string) (int, error) {
+				i, err := checkLabels(v[0], v[1])
+				return i - 1, err // this box has no Name field
+			},
+			func(v []string, ok bool) {
+				var err error
+				changed := false
+				if ok {
+					if m := labelsFrom(v[0], v[1]); m != old {
+						err = s.SetMeta(m)
+						changed = err == nil
+					}
+				}
+				finish() // after SetMeta, which needs the file open
+				switch {
+				case !ok:
+				case err != nil:
+					a.say(err.Error(), true)
+				case !changed:
+					a.say("the title and description of "+name+" are unchanged", false)
+				default:
+					a.reload("")
+					a.say("updated the title and description of "+name, false)
+				}
+			})
 	})
 }
 
@@ -842,16 +956,21 @@ func (a *App) remove() {
 }
 
 func (a *App) changePassword() {
-	a.unlockCurrent(func(s *Session) {
+	// The text isn't involved, so it is not put on screen.
+	a.unlockHidden(func(s *Session, finish func()) {
 		a.choosePassword(func(pw []byte, ok bool) {
 			if !ok {
+				finish()
 				return
 			}
 			res, err := s.Rekey(pw)
 			var storeErr *fileops.StoreUpdateError
+			if err != nil && !errors.As(err, &storeErr) {
+				vault.Wipe(pw) // the password did not change
+			}
+			finish()
 			switch {
 			case err != nil && !errors.As(err, &storeErr):
-				vault.Wipe(pw)
 				a.say(err.Error(), true)
 			case err != nil:
 				a.say(err.Error(), true) // changed, but the Keychain entry is stale

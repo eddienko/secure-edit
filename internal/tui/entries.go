@@ -5,6 +5,7 @@ package tui
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,7 @@ type Entry struct {
 	Path string
 	Kind Kind
 	Size int64
+	Meta vault.Meta // a sedit file's title and description, as the header says
 }
 
 // KindOf looks at the first bytes of the file at path.
@@ -49,6 +51,26 @@ func KindOf(path string) Kind {
 		return KindAge
 	}
 	return KindOther
+}
+
+// maxHeader is how much of a file is read to get at its title and description:
+// more than any header can be.
+const maxHeader = 2400
+
+// metaOf reads the title and description from the header of the sedit file at
+// path. They are not authenticated until the file is opened, so they are only
+// ever used as labels. A file without them, or one that can't be read, gives
+// none.
+func metaOf(path string) vault.Meta {
+	f, err := os.Open(path)
+	if err != nil {
+		return vault.Meta{}
+	}
+	defer f.Close()
+	head := make([]byte, maxHeader)
+	n, _ := io.ReadFull(f, head)
+	m, _ := vault.ReadMeta(head[:n])
+	return m
 }
 
 // hidden reports whether a name is bookkeeping rather than something to show:
@@ -80,6 +102,9 @@ func List(dir string) ([]Entry, error) {
 			e.Kind = KindDir
 		case fi.Mode().IsRegular():
 			e.Kind, e.Size = KindOf(path), fi.Size()
+			if e.Kind == KindSedit {
+				e.Meta = metaOf(path)
+			}
 		}
 		out = append(out, e)
 	}

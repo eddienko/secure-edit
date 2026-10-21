@@ -26,16 +26,29 @@ import (
 //	nonce   24  XChaCha20-Poly1305
 //	ciphertext + 16-byte tag
 //
-// The whole header (magic through nonce) is authenticated as associated
-// data, so tampering with the KDF parameters is detected.
+// Version 2 adds an optional title and description, readable without the
+// password, between the nonce and the ciphertext:
+//
+//	title length        2
+//	description length  2
+//	title, description  UTF-8
+//
+// A file without them is written as version 1, so only files that use the
+// feature need a sedit that knows version 2.
+//
+// The whole header (magic through the description) is authenticated as
+// associated data, so tampering with the KDF parameters or the labels is
+// detected.
 const (
-	version    = 1
-	saltLen    = 16
-	headerLen  = 6 + 1 + 4 + 4 + 1 + saltLen + chacha20poly1305.NonceSizeX
-	keyLen     = chacha20poly1305.KeySize
-	defaultT   = 3
-	defaultMem = 256 * 1024 // 256 MiB
-	defaultThr = 4
+	version     = 1 // no labels
+	versionMeta = 2 // with a title and description
+	saltLen     = 16
+	headerLen   = 6 + 1 + 4 + 4 + 1 + saltLen + chacha20poly1305.NonceSizeX
+	metaLenLen  = 4 // the two length fields of version 2
+	keyLen      = chacha20poly1305.KeySize
+	defaultT    = 3
+	defaultMem  = 256 * 1024 // 256 MiB
+	defaultThr  = 4
 
 	// Upper bounds so a malicious file can't make us allocate absurd memory.
 	maxT   = 20
@@ -74,11 +87,25 @@ func IsSedit(data []byte) bool {
 	return bytes.HasPrefix(data, magic)
 }
 
-// Encrypt seals plaintext under password with a fresh salt and nonce.
+// Encrypt seals plaintext under password with a fresh salt and nonce, and no
+// title or description.
 func Encrypt(password, plaintext []byte, p KDFParams) ([]byte, error) {
-	header := make([]byte, 0, headerLen)
+	return EncryptMeta(password, plaintext, p, Meta{})
+}
+
+// EncryptMeta is Encrypt with a title and description stored in the header. If
+// both are empty the file is an ordinary version 1 file.
+func EncryptMeta(password, plaintext []byte, p KDFParams, m Meta) ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	ver := byte(version)
+	if !m.IsZero() {
+		ver = versionMeta
+	}
+	header := make([]byte, 0, headerLen+metaLenLen+len(m.Title)+len(m.Description))
 	header = append(header, magic...)
-	header = append(header, version)
+	header = append(header, ver)
 	header = binary.BigEndian.AppendUint32(header, p.time)
 	header = binary.BigEndian.AppendUint32(header, p.memory)
 	header = append(header, p.threads)
@@ -93,6 +120,12 @@ func Encrypt(password, plaintext []byte, p KDFParams) ([]byte, error) {
 	}
 	header = append(header, salt...)
 	header = append(header, nonce...)
+	if ver == versionMeta {
+		header = binary.BigEndian.AppendUint16(header, uint16(len(m.Title)))
+		header = binary.BigEndian.AppendUint16(header, uint16(len(m.Description)))
+		header = append(header, m.Title...)
+		header = append(header, m.Description...)
+	}
 
 	key := p.key(password, salt)
 	defer Wipe(key)
@@ -100,38 +133,91 @@ func Encrypt(password, plaintext []byte, p KDFParams) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return aead.Seal(header, nonce, plaintext, header[:headerLen:headerLen]), nil
+	return aead.Seal(header, nonce, plaintext, header[:len(header):len(header)]), nil
 }
 
-// Decrypt authenticates and opens data. A wrong password returns ErrBadPassword.
-func Decrypt(password, data []byte) ([]byte, error) {
-	if len(data) < headerLen+chacha20poly1305.Overhead {
-		return nil, errors.New("file too short, not a sedit file")
+// header is a parsed file header.
+type header struct {
+	params KDFParams
+	salt   []byte
+	nonce  []byte
+	meta   Meta
+	length int // bytes of data taken by the header, which is also the associated data
+}
+
+// parseHeader reads the header of data. Nothing in it is trusted until the
+// ciphertext has been opened.
+func parseHeader(data []byte) (header, error) {
+	var h header
+	if len(data) < headerLen {
+		return h, errors.New("file too short, not a sedit file")
 	}
 	if !bytes.Equal(data[:len(magic)], magic) {
-		return nil, errors.New("not a sedit file (bad magic)")
+		return h, errors.New("not a sedit file (bad magic)")
 	}
-	if v := data[6]; v != version {
-		return nil, fmt.Errorf("unsupported file version %d", v)
+	v := data[6]
+	if v != version && v != versionMeta {
+		return h, fmt.Errorf("unsupported file version %d", v)
 	}
-	p := KDFParams{
+	h.params = KDFParams{
 		time:    binary.BigEndian.Uint32(data[7:11]),
 		memory:  binary.BigEndian.Uint32(data[11:15]),
 		threads: data[15],
 	}
+	p := h.params
 	if p.time == 0 || p.time > maxT || p.memory < 8 || p.memory > maxMem || p.threads == 0 || p.threads > maxThr {
-		return nil, errors.New("invalid KDF parameters in header")
+		return h, errors.New("invalid KDF parameters in header")
 	}
-	salt := data[16 : 16+saltLen]
-	nonce := data[16+saltLen : headerLen]
+	h.salt = data[16 : 16+saltLen]
+	h.nonce = data[16+saltLen : headerLen]
+	h.length = headerLen
+	if v == versionMeta {
+		if len(data) < headerLen+metaLenLen {
+			return h, errors.New("file too short, not a sedit file")
+		}
+		tl := int(binary.BigEndian.Uint16(data[headerLen:]))
+		dl := int(binary.BigEndian.Uint16(data[headerLen+2:]))
+		if tl > MaxTitle || dl > MaxDescription {
+			return h, errors.New("invalid title or description in header")
+		}
+		h.length = headerLen + metaLenLen + tl + dl
+		if len(data) < h.length {
+			return h, errors.New("file too short, not a sedit file")
+		}
+		body := data[headerLen+metaLenLen : h.length]
+		h.meta = Meta{Title: string(body[:tl]), Description: string(body[tl:])}
+	}
+	if len(data) < h.length+chacha20poly1305.Overhead {
+		return h, errors.New("file too short, not a sedit file")
+	}
+	return h, nil
+}
 
-	key := p.key(password, salt)
+// ReadMeta returns the title and description in data's header. It needs no
+// password, and for the same reason it can't vouch for them: they are only
+// known to be genuine once the file has been opened with Decrypt. A file
+// without them gives an empty Meta.
+func ReadMeta(data []byte) (Meta, error) {
+	h, err := parseHeader(data)
+	if err != nil {
+		return Meta{}, err
+	}
+	return h.meta, nil
+}
+
+// Decrypt authenticates and opens data. A wrong password returns ErrBadPassword.
+func Decrypt(password, data []byte) ([]byte, error) {
+	h, err := parseHeader(data)
+	if err != nil {
+		return nil, err
+	}
+	key := h.params.key(password, h.salt)
 	defer Wipe(key)
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return nil, err
 	}
-	pt, err := aead.Open(nil, nonce, data[headerLen:], data[:headerLen])
+	pt, err := aead.Open(nil, h.nonce, data[h.length:], data[:h.length])
 	if err != nil {
 		return nil, ErrBadPassword
 	}

@@ -18,7 +18,7 @@ sedit-tui --clipboard-timeout 10s ~/secrets
 │ secrets/                   ││ host=vpn.example.com                           │
 │ ├── personal/              ││ user=admin                                     │
 │ ├── work/                  ││ token=...                                      │
-│ ├── ▪ notes.txt            ││                                                │
+│ ├── ▪ Work VPN  vpn.txt    ││                                                │
 │ ├── · readme.md            ││                                                │
 │ └── ○ team.age             ││                                                │
 └────────────────────────────┘└────────────────────────────────────────────────┘
@@ -29,7 +29,13 @@ The list shows folders, then files. `▪` is a `sedit` file, `○` an age file (
 it into a `sedit` file with `sedit --import`) and `·` anything else. Backups
 (`.bak`), lock files and dot files are hidden.
 
-**Nothing is decrypted until you ask.** Selecting a file shows `LOCKED`. Press
+A file that has a **title** is listed by it, with the file name after it in dim
+text (`▪ Work VPN  vpn.txt`); one without is listed by its name. Titles and
+descriptions are readable without the password (they are stored in the clear, so
+don't put secrets in them): the locked preview shows the description, and `n`
+and `i` set them. See [Titles and descriptions](../README.md#titles-and-descriptions).
+
+**Nothing is decrypted until you ask.** Selecting a file shows `LOCKED` (with its description, if it has one). Press
 **Enter** to unlock it: if its password is stored in the Keychain, or the default
 password fits, it opens at once; otherwise you are asked (what you type is shown
 as dots). The preview then shows the text, and you can scroll it with **Tab**.
@@ -41,7 +47,8 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `Enter` | Unlock and show the file (or open or close a folder). |
 | `e` | Edit in your editor: unlocks first, then runs the same editing as `sedit FILE`, including the vim protections and the `SEDIT ENCRYPTED` banner. The previous version is kept as `.bak`. |
 | `y` | Copy the whole text to the clipboard (unlocks first if needed). It is cleared again after 30 seconds; see **Clipboard** below. |
-| `n` | New file in the selected folder. Asks for a name, then a password (the default, or one typed twice), then opens the editor. A new file left empty is not created. |
+| `n` | New file in the selected folder. Asks for a name, a title and a description in one box (Tab and Shift-Tab move between the fields; the title and description are optional; the description can have several lines, with Enter starting a new one, and **Ctrl-S** or Enter in the name or title creates the file), then a password (the default, or one typed twice), then opens the editor. Esc cancels. A new file left empty is not created. |
+| `i` | Change the file's title and description in a similar box (asks for the password if it is locked; the text and the password are not touched, and no backup is made). |
 | `r` | Rename or move (a new name, or a path relative to the file's folder). Its `.bak` and stored password go with it. |
 | `d` | Delete, after a confirmation that defaults to Cancel. Its `.bak` and stored password go too. |
 | `p` | Change the file's password. |

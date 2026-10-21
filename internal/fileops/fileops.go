@@ -228,6 +228,29 @@ func Remove(path string) (res Result, err error) {
 	return res, nil
 }
 
+// metaOf is the title and description in the header of the file at path, or none
+// if it can't be read.
+func metaOf(path string) vault.Meta {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return vault.Meta{}
+	}
+	m, _ := vault.ReadMeta(data)
+	return m
+}
+
+// SetMeta replaces the title and description of the sedit file at path, which
+// the caller has opened with password (so has plain) and should hold
+// vault.Lock(path) for. The text is not touched. Like Rekey it makes no backup:
+// a copy would only repeat the old labels.
+func SetMeta(path string, plain, password []byte, m vault.Meta) error {
+	out, err := vault.EncryptMeta(password, plain, vault.DefaultKDF, m)
+	if err != nil {
+		return err
+	}
+	return vault.WriteAtomic(path, out)
+}
+
 // StoreUpdateError means a file was re-encrypted under a new password but the
 // password remembered for it could not be updated. The file is fine, and the
 // stale entry is harmless but no longer works (it is removed on next use).
@@ -249,7 +272,7 @@ func (e *StoreUpdateError) Unwrap() error { return e.Err }
 //
 // The caller opens the file (so has plain) and should hold vault.Lock(path).
 func Rekey(path string, plain, newPassword []byte, updateStored bool) (res Result, err error) {
-	out, err := vault.Encrypt(newPassword, plain, vault.DefaultKDF)
+	out, err := vault.EncryptMeta(newPassword, plain, vault.DefaultKDF, metaOf(path))
 	if err != nil {
 		return res, err
 	}

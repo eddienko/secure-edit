@@ -21,6 +21,10 @@ type Session struct {
 	Password []byte
 	Plain    []byte
 	Src      unlock.Source
+
+	// NewMeta is the title and description a file that doesn't exist yet is
+	// created with. (An existing file's are in its header.)
+	NewMeta vault.Meta
 }
 
 // OpenSession reads the sedit file at path, still locked.
@@ -39,6 +43,15 @@ func OpenSession(path string) (*Session, error) {
 // empty text, to be filled in with Edit.
 func NewSession(path string, password []byte) *Session {
 	return &Session{Path: path, Password: password, Plain: []byte{}}
+}
+
+// Meta is the file's title and description.
+func (s *Session) Meta() vault.Meta {
+	if s.Cipher == nil {
+		return s.NewMeta
+	}
+	m, _ := vault.ReadMeta(s.Cipher)
+	return m
 }
 
 // Locked reports whether the text is not available.
@@ -133,9 +146,15 @@ func (s *Session) Edit() (saved bool, err error) {
 		vault.Wipe(edited)
 		return false, nil
 	}
-	if err := vault.Save(s.Path, s.Password, edited, s.Cipher); err != nil {
+	var saveErr error
+	if s.Cipher == nil {
+		saveErr = vault.SaveMeta(s.Path, s.Password, edited, nil, s.NewMeta)
+	} else {
+		saveErr = vault.Save(s.Path, s.Password, edited, s.Cipher)
+	}
+	if saveErr != nil {
 		vault.Wipe(edited)
-		return false, err
+		return false, saveErr
 	}
 	vault.Wipe(s.Plain)
 	s.Plain = edited
@@ -171,4 +190,32 @@ func (s *Session) Rekey(newPassword []byte) (fileops.Result, error) {
 		s.Cipher = data
 	}
 	return res, err // a StoreUpdateError is still reported, but the password did change
+}
+
+// SetMeta changes the file's title and description, leaving the text alone.
+func (s *Session) SetMeta(m vault.Meta) error {
+	if s.Locked() {
+		return errors.New("the file is locked")
+	}
+	if s.Cipher == nil {
+		s.NewMeta = m // not created yet: it will be with the first save
+		return m.Validate()
+	}
+	release, err := vault.Lock(s.Path)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.refresh(); err != nil {
+		return err
+	}
+	if err := fileops.SetMeta(s.Path, s.Plain, s.Password, m); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		return err
+	}
+	s.Cipher = data
+	return nil
 }

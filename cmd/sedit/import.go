@@ -99,7 +99,7 @@ func importFile(path string, identityFiles []string, out string, choice pwChoice
 		return err
 	}
 	defer vault.Wipe(password)
-	enc, err := vault.Encrypt(password, plain, vault.DefaultKDF)
+	enc, err := vault.EncryptMeta(password, plain, vault.DefaultKDF, createMeta)
 	if err != nil {
 		return err
 	}

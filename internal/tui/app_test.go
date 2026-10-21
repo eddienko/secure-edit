@@ -490,6 +490,9 @@ func TestNewFileRefusesBadNames(t *testing.T) {
 		h.key(tcell.KeyEnter)
 		h.waitFor(want)
 		h.notOnScreen("Choose a password:")
+		h.waitFor("Name:") // the box stays open, with the reason on the bar
+		h.key(tcell.KeyEscape)
+		h.waitGone("Name:")
 	}
 }
 
@@ -1270,17 +1273,16 @@ func TestThePreviewNeverSaysLockedForAnUnlockedFile(t *testing.T) {
 	h.remember(path)
 	useEditor(t, "true\n") // the editor changes nothing and closes at once
 
-	for _, key := range []rune{'y', 'e', 'p'} {
+	// These show the text they open. (p and i open the file too, but have
+	// nothing to do with its text, so they keep it off the screen: see
+	// labels_test.go.)
+	for _, key := range []rune{'y', 'e'} {
 		h.selectFile("notes.txt")
 		h.press('l') // lock it again
 		h.waitFor("LOCKED")
 		h.press(key)
 		h.waitFor(secretText)
 		h.notOnScreen("LOCKED")
-		if key == 'p' { // this one waits for a new password: cancel it
-			h.key(tcell.KeyEscape)
-			h.waitGone("Which password")
-		}
 		h.key(tcell.KeyEscape)
 		h.settle()
 	}

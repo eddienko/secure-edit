@@ -56,6 +56,10 @@ edit.
 - **Tidy file management:** `sedit --mv` and `sedit --rm` move and delete a file
   together with its `.bak` backup and its remembered password, which a plain
   `mv` or `rm` would leave behind.
+- **Titles and descriptions:** give a file a title and a description that show
+  up while it is still locked (`sedit-tui` lists files by title). They are stored
+  in the clear, so they are labels, not secrets; see
+  [Titles and descriptions](#titles-and-descriptions).
 - **Previous version kept:** each save keeps the old version, still encrypted,
   as `FILE.bak`.
 - **Optional Keychain support (macOS, opt-in):** remember a file's password in
@@ -114,6 +118,8 @@ go build -o sedit-tui ./cmd/sedit-tui
 ```
 sedit FILE                      edit FILE (created if it doesn't exist or is empty)
 sedit -p FILE                   decrypt FILE to stdout
+sedit --info FILE               show FILE's title and description (no password needed)
+sedit --set-info FILE --title T change FILE's title and/or description (--description D)
 sedit --write FILE              make FILE's contents whatever is piped in on stdin
 sedit --append FILE             add whatever is piped in to the end of FILE
 sedit --passwd FILE             change FILE's password
@@ -210,6 +216,37 @@ sedit-tui ~/secrets        # a folder
 From the interface you can open, create, rename, delete and re-key files, and copy
 a file's text to the clipboard (cleared again after 30 seconds). See
 **[docs/tui.md](docs/tui.md)** for the keys, locking, clipboard and the rest.
+
+### Titles and descriptions
+
+A file can have a **title** (a short name for it, one line, up to 200 bytes) and a
+**description** (a few lines, up to 2000 bytes). `sedit-tui` lists a file by its
+title, with the file name after it in dim text, and shows the description in the
+preview while the file is locked.
+
+```sh
+sedit --title "Work VPN" --description "Office VPN login; rotate every 90 days" vpn.txt
+sedit --info vpn.txt                      # prints them, without asking for the password
+sedit --set-info vpn.txt --title "Office VPN"      # change one; an empty value clears it
+```
+
+`--title` and `--description` give a file you are creating one (a new `FILE`,
+`--encrypt`, `--write`, `--append` or `--import`); for a file that exists, use
+`--set-info`, which asks for the password. Saving, editing, `--passwd` and
+`--mv` leave them as they are. In `sedit-tui`, the new-file box asks for them
+(the description can have several lines) and `i` changes them later.
+
+**They are not secret.** To be shown without the password they sit in the file's
+header, readable by anyone who has the file. Don't put anything sensitive in
+them. They are authenticated, so a changed title or description makes the file
+fail to open, but until it is opened they can't be vouched for: treat what
+`--info` or the list shows as a hint. Control characters are refused, and the
+interface shows any it finds in a file as dots. `--share` does not pass them on:
+the copy for someone else contains only the text.
+
+A file with a title or description uses format version 2, which sedit before
+1.4 cannot open (it says `unsupported file version 2`). Files without them stay
+version 1, readable by every version.
 
 ### Moving and deleting files
 
@@ -552,16 +589,21 @@ All integers are big endian.
 | Field      | Size | Notes                              |
 |------------|------|------------------------------------|
 | magic      | 6    | `SEDIT\0`                          |
-| version    | 1    | currently `1`                      |
+| version    | 1    | `1`, or `2` if there is a title or description |
 | time       | 4    | Argon2id iterations                |
 | memory     | 4    | Argon2id memory in KiB             |
 | threads    | 1    | Argon2id parallelism               |
 | salt       | 16   | random, fresh on every save        |
 | nonce      | 24   | random, fresh on every save        |
+| title length | 2  | version 2 only                     |
+| description length | 2 | version 2 only                |
+| title, description | n | version 2 only, UTF-8, in the clear |
 | ciphertext | n+16 | XChaCha20-Poly1305, includes tag   |
 
-The header (magic through nonce) is passed as associated data. KDF parameters in
-a file are bounded on read, so a hostile file can't force huge allocations.
+The header (magic through the description, if there is one) is passed as
+associated data, so a change to the KDF parameters, the title or the description
+is detected. The parameters and the lengths are bounded on read, so a hostile file
+can't force huge allocations.
 
 ## Limitations
 

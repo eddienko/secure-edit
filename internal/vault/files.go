@@ -43,9 +43,20 @@ func WriteAtomic(path string, data []byte) error {
 
 // Save encrypts content under password and writes it to path. prev is the
 // file's existing ciphertext, which is kept as BackupPath(path) (still
-// encrypted), or nil for a new file.
+// encrypted), or nil for a new file. The file keeps the title and description
+// that prev has.
 func Save(path string, password, content, prev []byte) error {
-	out, err := Encrypt(password, content, DefaultKDF)
+	var m Meta
+	if prev != nil {
+		m, _ = ReadMeta(prev)
+	}
+	return SaveMeta(path, password, content, prev, m)
+}
+
+// SaveMeta is Save with a title and description for the file, which replace any
+// that prev has.
+func SaveMeta(path string, password, content, prev []byte, m Meta) error {
+	out, err := EncryptMeta(password, content, DefaultKDF, m)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"
@@ -16,6 +20,7 @@ import (
 var (
 	plain  = tcell.StyleDefault
 	bold   = tcell.StyleDefault.Bold(true)
+	dim    = tcell.StyleDefault.Dim(true)
 	invert = tcell.StyleDefault.Reverse(true)
 	alert  = tcell.StyleDefault.Reverse(true).Bold(true)
 )
@@ -75,4 +80,23 @@ func (s *statusBar) Draw(screen tcell.Screen) {
 		screen.SetContent(x+i, y, ' ', nil, s.style)
 	}
 	drawText(screen, x+1, y, w-2, s.text, s.style)
+}
+
+// safeText makes text from a file's header fit for the screen. The title and
+// description are readable without the password, so nothing vouches for them:
+// control characters, which could move the cursor or retitle the window on some
+// terminals, are shown as a dot. Line breaks are kept if keepNewlines is set and
+// become spaces otherwise.
+func safeText(s string, keepNewlines bool) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' && keepNewlines:
+			return r
+		case r == '\n' || r == '\t' || r == '\r':
+			return ' '
+		case unicode.IsControl(r) || r == utf8.RuneError:
+			return '·'
+		}
+		return r
+	}, s)
 }
