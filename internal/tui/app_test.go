@@ -950,3 +950,88 @@ func TestSelectionAndBarsAreInReverseVideo(t *testing.T) {
 		t.Errorf("an error message should be reversed and bold, got attr=%v", c.attr)
 	}
 }
+
+// ---- pop-ups ------------------------------------------------------------
+
+// dialogRect finds the box a dialog is drawn in: the one with the focused
+// (double-line) border. While a dialog is open nothing else has the focus.
+func dialogRect(g [][]cellInfo) (x0, y0, x1, y1 int, ok bool) {
+	for y, row := range g {
+		for x, c := range row {
+			if c.r == '╔' {
+				x0, y0, ok = x, y, true
+				for xx := x; xx < len(row); xx++ {
+					if row[xx].r == '╗' {
+						x1 = xx
+					}
+				}
+				for yy := y; yy < len(g); yy++ {
+					if g[yy][x].r == '╚' {
+						y1 = yy
+					}
+				}
+				return
+			}
+		}
+	}
+	return
+}
+
+// A pop-up must hide what is underneath it. The screen behind is filled with X,
+// so any X that survives inside the dialog's box is text showing through.
+func TestPopupsHideWhatIsUnderThem(t *testing.T) {
+	dir := t.TempDir()
+	fill := strings.Repeat("X", 200) + "\n"
+	path := seditFile(t, dir, "notes.txt", "pw", strings.Repeat(fill, 60))
+	// A long name fills the file list with X, under the left part of the dialogs.
+	locked := seditFile(t, dir, strings.Repeat("X", 22)+".txt", "pw", "secret")
+	h := newHarness(t, dir, Options{})
+	h.store.m[account(t, path)] = []byte("pw")
+	_ = locked
+
+	check := func(state string) {
+		t.Helper()
+		h.settle()
+		g := h.grid()
+		x0, y0, x1, y1, ok := dialogRect(g)
+		if !ok || x1 <= x0 || y1 <= y0 {
+			t.Fatalf("%s: no dialog box found on screen:\n%s", state, h.screen())
+		}
+		for y := y0 + 1; y < y1; y++ {
+			for x := x0 + 1; x < x1; x++ {
+				if g[y][x].r == 'X' {
+					t.Fatalf("%s: text from underneath shows through the dialog at column %d, row %d:\n%s", state, x, y, h.screen())
+				}
+			}
+		}
+	}
+
+	h.selectFile("notes.txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor("XXXXXXXXXXXXXXXXXXXX") // the preview is full of X
+
+	h.press('n')
+	h.waitFor("Name:")
+	check("the new-file name box")
+	h.key(tcell.KeyEscape)
+	h.waitGone("Name:")
+
+	h.press('r')
+	h.waitFor("New name or path:")
+	check("the rename box")
+	h.key(tcell.KeyEscape)
+	h.waitGone("New name or path:")
+
+	h.press('?')
+	h.waitFor("Nothing is decrypted")
+	check("the help box")
+	h.key(tcell.KeyEscape)
+	h.waitGone("Nothing is decrypted")
+
+	// The password box, over the file list full of X (the preview is the locked
+	// file's, so only the list is X there).
+	h.selectFile(strings.Repeat("X", 22) + ".txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor("Password:")
+	check("the password box")
+}

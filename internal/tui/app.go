@@ -506,13 +506,15 @@ func (a *App) secretDialog(title, label, errMsg string, done func(pw []byte, ok 
 }
 
 // inputDialog asks for a line of text.
+//
+// The input field is itself the bordered box. It must not be wrapped in a
+// tview.Flex: a Flex does not clear the area it covers (so that layouts don't
+// wipe their children), which would let whatever is underneath show through
+// the empty parts of the dialog.
 func (a *App) inputDialog(title, label, initial string, done func(text string, ok bool)) {
 	in := tview.NewInputField().SetLabel(label + " ").SetText(initial).SetFieldWidth(0)
 	in.SetFieldStyle(tcell.StyleDefault.Underline(true)).SetLabelStyle(plain)
-	box := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(in, 1, 0, true).
-		AddItem(tview.NewTextView().SetText("Enter to confirm, Esc to cancel"), 1, 0, false)
-	box.SetBorder(true).SetTitle(" "+title+" ").SetBorderPadding(1, 0, 1, 1)
+	in.SetBorder(true).SetTitle(" "+title+"  (Enter confirms, Esc cancels) ").SetBorderPadding(0, 0, 1, 1)
 	in.SetDoneFunc(func(key tcell.Key) {
 		text := in.GetText()
 		switch key {
@@ -524,7 +526,7 @@ func (a *App) inputDialog(title, label, initial string, done func(text string, o
 			done("", false)
 		}
 	})
-	a.openDialog("input", box, 64, 6)
+	a.openDialog("input", in, 72, 3)
 }
 
 // choiceDialog shows a question with buttons; done gets the index of the one
