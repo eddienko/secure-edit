@@ -1,17 +1,20 @@
-package main
+// Package version says which version of sedit this is.
+package version
 
 import (
 	"runtime/debug"
 )
 
-// buildVersion can be set at build time:
+// Build can be set at build time:
 //
-//	go build -ldflags "-X main.buildVersion=v1.2.3"
-var buildVersion = ""
+//	go build -ldflags "-X github.com/eddienko/secure-edit/internal/version.Build=v1.2.3"
+var Build = ""
 
-func versionString() string {
-	if buildVersion != "" {
-		return buildVersion
+// String is the version: the one set at build time, else the module version when
+// installed with "go install", else the commit the binary was built from.
+func String() string {
+	if Build != "" {
+		return Build
 	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {

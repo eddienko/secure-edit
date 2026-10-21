@@ -2,79 +2,92 @@
 
 <img src="logo.png" align="right" width="200" alt="secure-edit logo">
 
-Edit a passphrase-encrypted text file with your normal editor, and share it
-safely with others.
+Keep notes, credentials and other text in files encrypted with a passphrase.
+Browse them in a full-screen terminal interface, edit them in your own editor, and
+share them safely with others.
 
 `secure-edit` a.k.a. `sedit` uses authenticated encryption, so a wrong password
-is rejected **before** the editor opens, and any tampering with the file is
-detected. When you need to hand a file to someone else, `sedit --share` encrypts
-a copy to their public key (age or SSH) that they can open with the standard
-`age` tool, and `sedit --import` turns a file sent to you back into one you can
-edit.
+is rejected **before** the editor opens, and any tampering with a file is
+detected. Nothing is decrypted until you ask, and what is open locks itself again.
 
 <br clear="right">
 
 <p align="center">
-  <img src="example.png" alt="secure-edit editor" width="800">
+  <img src="example.png" alt="The sedit interface: a list of encrypted files and folders on the left, and an unlocked file on the right" width="800">
 </p>
+
+## Quick start
+
+```sh
+sedit ~/secrets        # open the interface on a folder
+sedit                  # ...or on $SEDIT_HOME, if set, otherwise the current folder
+```
+
+The list on the left shows your files and folders; the preview on the right stays
+**locked** until you press Enter. The keys you need first:
+
+| Key | Does |
+|-----|------|
+| `⏎` | Unlock the selected file and show it (a folder opens or closes) |
+| `e` | Edit it in your editor (`$SEDIT_EDITOR`, `$VISUAL`, `$EDITOR`, or vim) |
+| `y` | Copy the text to the clipboard, cleared again after 30 seconds |
+| `n` `N` | New file, new folder (each with an optional title and description) |
+| `/` | Filter the list by title or name |
+| `?` `q` | All the keys, quit |
+
+Press `?` in the interface for the rest. It is described in full in
+[docs/interface.md](docs/interface.md).
+
+The same program is also a command-line tool, for single files and for scripts:
+
+```sh
+sedit notes.txt                          # edit one file (created if new)
+sedit -p notes.txt | grep api            # print it
+echo "new line" | sedit --append notes.txt
+sedit --share notes.txt --to age1...     # a copy someone else opens with "age"
+```
+
+See [docs/command-line.md](docs/command-line.md).
 
 ## Features
 
+- **Locked by default.** The interface decrypts a file only when you press Enter,
+  re-locks it when you move on or after two minutes without a key, and wipes the
+  text and the password from memory when it does.
 - **Strong encryption:** XChaCha20-Poly1305 with a key derived from your
   passphrase by Argon2id (3 passes, 256 MiB, 4 threads).
-- **Wrong password fails:** the file is authenticated and decrypted before the
-  editor launches. No more editing garbage.
-- **Tamper detection:** the whole file header, including the KDF parameters, is
-  authenticated.
-- **Your editor:** uses `$SEDIT_EDITOR`, then `$VISUAL`, then `$EDITOR`, then
-  `vim` (or `vi`). Graphical editors set in `$VISUAL` or `$EDITOR` are ignored,
-  because they keep plaintext copies (see [Choosing an editor](#choosing-an-editor)).
-  The editor is given a temp file named after your real file, so it shows the
-  right name and picks the right syntax highlighting.
-- **Vim protections and cues:** for vi, vim and nvim, `sedit` disables swap,
-  backup, undo and viminfo files so plaintext isn't leaked, sets the terminal
-  title to `sedit: FILE`, and shows a blue `SEDIT ENCRYPTED` banner in the status
-  line so you can tell you are in a sedit session. A small `sedit · encrypted`
-  watermark sits at the right of the first line (virtual text, so it is never
-  saved in the file; it needs vim 9.0.0067 or newer, or neovim). The banner
-  replaces your own status line for that session, and plugins can't remove it.
-  Turn the banner and watermark off with `SEDIT_STATUSLINE=0`.
-- **Clear confirmation:** when the editor exits, `sedit` says what happened, for
-  example `sedit: saved notes.txt (encrypted; password from Keychain)`, so you
-  know the file was encrypted and where the password came from. Messages go to
-  stderr, so `sedit -p FILE | ...` output is unaffected.
-- **Safe saves:** written atomically (temp file, fsync, rename). If the editor
-  exits with an error, or you make no changes, the file is left untouched.
-- **Piping:** `echo text | sedit --write FILE` stores piped data, and `--append`
-  adds to a file, with no editor.
+- **Wrong password fails early:** the file is authenticated and decrypted before the
+  editor launches. No more editing garbage. The whole header, including the KDF
+  parameters, is authenticated, so tampering is detected.
+- **Your editor:** `$SEDIT_EDITOR`, then `$VISUAL`, then `$EDITOR`, then vim.
+  Graphical editors in `$VISUAL` or `$EDITOR` are ignored, because they keep
+  plaintext copies (see [Choosing an editor](docs/command-line.md#choosing-an-editor)).
+  For vim, vi and nvim, `sedit` also turns off swap, backup, undo and viminfo
+  files and shows a `SEDIT ENCRYPTED` banner so you know you are in a sedit session.
+- **Titles, descriptions and folders.** Give a file or folder a title and a
+  description that show while it is locked, and organise files in folders you can
+  make, rename, move and delete from the interface. File labels are stored in the
+  clear; see [Titles and descriptions](docs/command-line.md#titles-and-descriptions).
+- **Find things:** `/` filters by title or name across the whole tree.
+- **Safe saves:** written atomically, with the previous version kept (still
+  encrypted) as `FILE.bak`. A lock stops two `sedit` processes editing the same file.
+- **Clipboard with a timer:** copied text is cleared again after 30 seconds, and at
+  once when you quit, but only if you haven't copied something else since.
 - **Sharing:** `sedit --share` writes a copy encrypted to someone's age or SSH
-  public key, which they can read with the standard `age` tool and no `sedit`.
-  `sedit --import` turns such a file (or any age file) into a `sedit` file, and
-  `sedit --keygen` creates the key pair you need to receive one.
-- **A terminal interface:** [`sedit-tui`](docs/tui.md) shows your files in a list with a preview
-  that stays locked until you press Enter, and re-locks when you move on.
-- **Tidy file management:** `sedit --mv` and `sedit --rm` move and delete a file
-  together with its `.bak` backup and its remembered password, which a plain
-  `mv` or `rm` would leave behind.
-- **Titles and descriptions:** give a file a title and a description that show
-  up while it is still locked (`sedit-tui` lists files by title). They are stored
-  in the clear, so they are labels, not secrets; see
-  [Titles and descriptions](#titles-and-descriptions).
-- **Previous version kept:** each save keeps the old version, still encrypted,
-  as `FILE.bak`.
-- **Optional Keychain support (macOS, opt-in):** remember a file's password in
-  the login keychain so you don't retype it. Off by default; see
-  [Remembering passwords](#remembering-passwords-macos-keychain) for the
-  security trade-off.
-- **Concurrent-edit protection:** a lock prevents two `sedit` processes from
-  editing the same file at once.
+  public key, which they open with the standard `age` tool and no `sedit`;
+  `sedit --import` turns such a file into one you can edit; `--keygen` makes the key.
+- **Piping and scripting:** `--write`, `--append` and `-p`, with no editor.
+- **Tidy file management:** `--mv` and `--rm` move and delete a file together with
+  its backup and remembered password, which a plain `mv` or `rm` would leave behind.
+- **Optional Keychain support (macOS, opt-in):** remember a file's password, or a
+  default for new files, in the login keychain. Off unless you ask; see
+  [docs/keychain.md](docs/keychain.md) for the trade-off.
 
 ## Install
 
 ### From a release
 
-Download the tarball for your platform (macOS or Linux, arm64 or amd64; it holds
-`sedit` and the terminal interface `sedit-tui`) from the
+Download the tarball for your platform (macOS or Linux, arm64 or amd64) from the
 [Releases page](https://github.com/eddienko/secure-edit/releases), check it
 against `SHA256SUMS`, and put `sedit` somewhere on your `PATH`:
 
@@ -100,7 +113,6 @@ With `go install`, which puts `sedit` in `$(go env GOBIN)` (default `~/go/bin`):
 
 ```sh
 go install github.com/eddienko/secure-edit/cmd/sedit@latest
-go install github.com/eddienko/secure-edit/cmd/sedit-tui@latest   # the terminal interface
 ```
 
 Or from a clone:
@@ -109,619 +121,21 @@ Or from a clone:
 git clone https://github.com/eddienko/secure-edit.git
 cd secure-edit
 go build -o sedit ./cmd/sedit
-go build -o sedit-tui ./cmd/sedit-tui
-# optionally: mv sedit sedit-tui /usr/local/bin/
+# optionally: mv sedit /usr/local/bin/
 ```
 
-## Usage
-
-```
-sedit FILE                      edit FILE (created if it doesn't exist or is empty)
-sedit -p FILE                   decrypt FILE to stdout
-sedit --info FILE               show FILE's title and description (no password needed)
-sedit --set-info FILE --title T change FILE's title and/or description (--description D)
-sedit --write FILE              make FILE's contents whatever is piped in on stdin
-sedit --append FILE             add whatever is piped in to the end of FILE
-sedit --passwd FILE             change FILE's password
-sedit --encrypt [-y] FILE       encrypt an existing plaintext FILE in place
-sedit --mv OLD NEW              move a file, with its backup and remembered password
-sedit --rm [-y] FILE...         delete files, with their backups and remembered passwords
-sedit --share FILE --to KEY     write a copy of FILE for someone else (see below)
-sedit --import FILE.age -i KEY  turn an age-encrypted file into a sedit file
-sedit --keygen -o FILE          create an age key pair for receiving shared files
-sedit --remember FILE           edit FILE and save its password in the macOS Keychain
-sedit --forget FILE             remove FILE's password from the Keychain
-sedit --set-default             store a default password in the macOS Keychain
-sedit --forget-default          remove the default password
-sedit -h, --help                show usage
-sedit --version                 show the version
-```
-
-If `FILE` is a symlink, `sedit` follows it: the file it points to is edited,
-locked and backed up, and the link itself is left alone.
-
-`--default` or `--custom` can be added to `FILE`, `--passwd` and `--encrypt` to
-choose the password for a new file without being asked (see
-[Default password](#default-password-macos-keychain)).
-
-```sh
-sedit secrets.enc            # prompts for a password, opens $EDITOR
-sedit -p secrets.enc | grep api
-sedit --passwd secrets.enc
-```
-
-For a new file you are asked for the password twice. An empty password is
-rejected.
-
-### Choosing an editor
-
-`sedit` picks the editor from `$SEDIT_EDITOR`, then `$VISUAL`, then `$EDITOR`,
-then `vim` (or `vi` if vim isn't installed). Setting `SEDIT_EDITOR` is the way to
-use a different editor for `sedit` than for everything else:
-
-```sh
-export SEDIT_EDITOR=vim
-```
-
-**Graphical editors are ignored by default.** If `$VISUAL` or `$EDITOR` names VS
-Code (`code`, `code-insiders`, `codium`), Cursor, Windsurf, Zed, Sublime Text
-(`subl`), Atom, TextMate (`mate`) or BBEdit, `sedit` skips it and tells you:
-
-```
-sedit: ignoring VISUAL=code (graphical editors keep plaintext copies); using vim. Set SEDIT_EDITOR to override.
-```
-
-The reason is that these editors keep their own history and backup stores
-outside `sedit`'s control (VS Code's Local History and hot-exit backups, for
-example), which can hold plaintext copies of every version you save. They also
-don't fit well with `sedit`: the vim-only extras (title, banner, watermark)
-don't apply.
-
-**To use one anyway**, say so explicitly: `SEDIT_EDITOR=code sedit FILE`. Many
-graphical editors hand the file to an already running app and **exit
-immediately**, which would make `sedit` think you are done: it would find the
-file unchanged and delete its temp file while the editor still shows it. For the
-editors above `sedit` adds `--wait` for you (so this runs `code --wait`) and
-reminds you about the plaintext copies. For any other editor, make the command
-wait yourself (look for a `--wait` or `-w` option). If an editor exits within a
-second without changing the file, `sedit` warns that it may have detached.
-
-Terminal editors such as nano and emacs are used as they are. Only vim, vi and
-nvim get the leak protections described above.
-
-### Environment variables
-
-| Variable             | Effect                                                         |
-|----------------------|----------------------------------------------------------------|
-| `SEDIT_EDITOR`       | The editor to run, taking priority over `VISUAL` and `EDITOR`. The only way to use a graphical editor. |
-| `VISUAL`, `EDITOR`   | The editor to run if `SEDIT_EDITOR` is unset (`VISUAL` first). Graphical editors here are ignored. Default: `vim`, else `vi`. |
-| `SEDIT_STATUSLINE`   | Set to `0` (or `false`, `no`, `off`) to turn off the vim banner: the `SEDIT ENCRYPTED` status line banner and the watermark on the first line. Your own status line is left alone. The terminal title and the leak protections stay on. |
-
-To make the opt-out permanent, put `export SEDIT_STATUSLINE=0` in your shell
-profile. Anything else, or leaving it unset, keeps the banner.
-
-### Terminal interface (sedit-tui)
-
-`sedit-tui` is a full-screen way to browse and manage a folder of `sedit` files:
-a list on the left and a preview on the right that stays locked until you press
-Enter and locks again when you move on. It is a separate program, built from the
-same code as `sedit`, and uses the same passwords, Keychain entries and editor
-settings.
-
-```sh
-sedit-tui                  # the current folder
-sedit-tui ~/secrets        # a folder
-```
-
-From the interface you can open, create, rename, delete and re-key files, and copy
-a file's text to the clipboard (cleared again after 30 seconds). See
-**[docs/tui.md](docs/tui.md)** for the keys, locking, clipboard and the rest.
-
-### Titles and descriptions
-
-A file can have a **title** (a short name for it, one line, up to 200 bytes) and a
-**description** (a few lines, up to 2000 bytes). `sedit-tui` lists a file by its
-title, with the file name after it in dim text, and shows the description in the
-preview while the file is locked.
-
-```sh
-sedit --title "Work VPN" --description "Office VPN login; rotate every 90 days" vpn.txt
-sedit --info vpn.txt                      # prints them, without asking for the password
-sedit --set-info vpn.txt --title "Office VPN"      # change one; an empty value clears it
-```
-
-`--title` and `--description` give a file you are creating one (a new `FILE`,
-`--encrypt`, `--write`, `--append` or `--import`); for a file that exists, use
-`--set-info`, which asks for the password. Saving, editing, `--passwd` and
-`--mv` leave them as they are. In `sedit-tui`, the new-file box asks for them
-(the description can have several lines) and `i` changes them later.
-
-**They are not secret.** To be shown without the password they sit in the file's
-header, readable by anyone who has the file. Don't put anything sensitive in
-them. They are authenticated, so a changed title or description makes the file
-fail to open, but until it is opened they can't be vouched for: treat what
-`--info` or the list shows as a hint. Control characters are refused, and the
-interface shows any it finds in a file as dots. `--share` does not pass them on:
-the copy for someone else contains only the text.
-
-**Folders** can have a title and description too, in `sedit-tui` only: see
-[docs/tui.md](docs/tui.md). They are kept unencrypted in a hidden `.sedit-folder`
-file inside the folder.
-
-A file with a title or description uses format version 2, which sedit before
-1.4 cannot open (it says `unsupported file version 2`). Files without them stay
-version 1, readable by every version.
-
-### Moving and deleting files
-
-A `sedit` file has things that belong to it: its `FILE.bak` backup, and, if you
-used `--remember`, a password stored in the Keychain under the file's path. A
-plain `mv` leaves the backup behind and orphans the Keychain entry; a plain `rm`
-leaves both. These commands look after all of it:
-
-```sh
-sedit --mv secrets.txt archive/old-secrets.txt     # rename or move
-sedit --mv secrets.txt archive/                    # into an existing directory
-sedit --rm old-notes.txt                           # asks first
-sedit --rm -y a.txt b.txt c.txt                    # several files, no question
-```
-
-- **`--mv`** moves the file, its `.bak` and its remembered password to the new
-  place, and tells you what came along. It works across file systems, and the
-  file keeps its permissions.
-- **`--rm`** deletes the file, its `.bak`, its remembered password and its lock
-  file. It asks for confirmation (`-y` skips that, and is required when there is
-  no terminal). **It is not a secure erase:** the file is encrypted, but its data
-  may remain in backups and on disk. It deletes only that file's own Keychain
-  entry, never the default password.
-- **They never overwrite.** `--mv` stops if the destination, or a `.bak` there,
-  already exists.
-- **Only `sedit` files.** Anything else (a plain file, a directory) is refused, so
-  these can't be used as a general `mv` or `rm`. Symlinks are refused too, since
-  following one would move or delete the wrong thing; use the real file.
-- **`--rm` checks every file first.** If one name is wrong, nothing is deleted.
-- A file that another `sedit` has open is refused.
-- A problem with the Keychain (it is locked, say) is reported as a warning, not
-  an error: the file operation still happens, and an old entry is kept rather than
-  lost.
-
-### Piping data in
-
-`--write` and `--append` take the data from stdin, with no editor involved:
-
-```sh
-echo "my secret" | sedit --write secret.txt          # replace the contents, like  >
-echo "api key: abc123" | sedit --append secret.txt   # add to the end, like  >>
-pbpaste | sedit --write notes.txt
-sedit -p old.txt | tr a-z A-Z | sedit --write new.txt
-```
-
-The file is created if it doesn't exist. Because stdin carries the data, the
-password can't come from stdin as well:
-
-- **Existing files:** the password comes from the Keychain (the file's own
-  entry, then the default password) or, failing that, `sedit` asks for it on the
-  terminal itself (`/dev/tty`), so it works in the middle of a pipeline.
-- **New files:** you are asked for a new password, twice, on the terminal. Use
-  `--default` or `--custom` to choose without being asked.
-- **No terminal at all** (a cron job, for example) and no stored password: it
-  stops with a message instead of hanging. Store the password with `--remember`,
-  or set a default one with `--set-default`, and it works unattended.
-
-Things to know:
-
-- **The data is stored exactly as it arrives.** Nothing is added, so `echo` adds a
-  newline and `printf 'x'` doesn't. `--append` doesn't insert a line break
-  either, so a file that doesn't end in a newline gets the new text glued on.
-- **Empty input is refused.** If the command before the pipe fails and sends
-  nothing, `--write` won't replace your file with nothing.
-- Every change keeps the previous version as `FILE.bak`, as an edit does.
-- **Piping into a plain `sedit FILE` does not store the data.** There stdin is
-  read as the password (see Scripting below), so `echo "my secret" | sedit FILE`
-  would make `my secret` the password of a new, empty file. `sedit` warns about
-  this when it happens; use `--write` instead.
-- `--write` refuses to run when stdin is a terminal, and input is limited to
-  256 MiB.
-
-### Converting an existing plaintext file
-
-`sedit` refuses to open a file that isn't a sedit file, and says so before asking
-for a password. This protects you from typos like `sedit .bashrc`. To encrypt an
-existing plaintext file deliberately:
-
-```sh
-sedit --encrypt notes.txt      # asks for confirmation, then a new password
-sedit --encrypt -y notes.txt   # skip the confirmation (required without a terminal)
-```
-
-It refuses files that are already encrypted or empty. An empty file needs no
-conversion: `sedit FILE` treats it as new. No `.bak` is created, because it would
-be a plaintext copy. See the limitations below about the old plaintext.
-
-### Sharing a file with someone
-
-A `sedit` file can only be opened with its password. To give someone a copy they
-can read without knowing it, encrypt a copy to their public key using
-[age](https://age-encryption.org):
-
-```sh
-sedit --share secrets.txt --to age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
-sedit --share secrets.txt --to "ssh-ed25519 AAAA... alice@laptop"
-sedit --share secrets.txt -R alice.pub -R bob.pub -o for-the-team.age
-```
-
-`sedit` decrypts the file in memory and writes the copy, so the plaintext never
-touches the disk and no editor is involved. The recipient decrypts it with the
-ordinary `age` command and doesn't need `sedit`:
-
-```sh
-age -d -i ~/.ssh/id_ed25519 secrets.txt.age      # with their SSH key
-age -d -i key.txt secrets.txt.age                # with an age key
-```
-
-| Option | Meaning |
-|--------|---------|
-| `--to KEY` | A recipient's public key: an age key (`age1...`, or a post-quantum `age1pq1...`) or an SSH public key (`ssh-ed25519`, `ssh-rsa`). Repeat it for several recipients. |
-| `-R FILE` | A file of public keys, one per line (`#` comments and blank lines are ignored). An SSH `.pub` file works as it is. May be repeated. |
-| `-o OUT` | Where to write the copy. Default: `FILE.age` next to the original. `-o -` writes to stdout. An existing `OUT` is replaced. |
-| `-a`, `--armor` | Write text (ASCII armor) instead of binary, for pasting into an email or chat. Binary output to a terminal is refused. |
-
-Things to know:
-
-- **It is a snapshot, in one direction.** The recipient gets a copy of the
-  contents as they are now. Their changes don't come back, and later changes of
-  yours don't reach them. Share again to send an update.
-- **Check the key.** Make sure the public key really belongs to the person, for
-  example by confirming it with them over another channel. `sedit` can't know.
-- **You can't take it back.** Anyone who has the copy and their key can read it,
-  for as long as they keep it.
-- **No mixing post-quantum and classic keys.** `age` refuses a file addressed to
-  both kinds, so give either `age1pq1...` keys only, or classic keys only.
-- **Not supported:** `age` plugin recipients (`age1yubikey...`, which need an
-  external program) and tagged recipients. Private keys are rejected, and are
-  never echoed back.
-- `--share` never overwrites the `sedit` file it reads from, even through a
-  symlink or hard link, and it leaves the original untouched.
-- After sharing, the recipient's copy is only as private as their key and their
-  machine. The copy decrypts to plain text on their side.
-
-### Generating a key
-
-To receive files shared with `--share`, or any age-encrypted file, you need a key
-pair. `sedit` can make one, so nothing else has to be installed:
-
-```sh
-sedit --keygen -o ~/.config/sedit/key.txt
-```
-
-```
-Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
-sedit: private key saved to /Users/you/.config/sedit/key.txt (keep it secret)
-```
-
-- **Give the public key** (`age1...`) to the people who want to send you files.
-  It isn't secret. If you lose track of it, it is also in the `# public key:` line
-  of the key file.
-- **Keep the key file private.** Anyone who has it can read every file that was
-  encrypted to you. It is created with mode `0600`. The key is not passphrase
-  protected, so treat the file like an SSH private key and keep it out of
-  repositories and cloud-synced folders unless you accept that.
-- **`-o FILE` is required**, so a private key never lands in the current
-  directory (possibly a git repository) by accident. The directory must already
-  exist. An existing file, or a symlink, is never overwritten. `-o -` prints the
-  key to stdout instead.
-- **`--pq`** makes a post-quantum hybrid key (`age1pq1...`). Anyone sending to it
-  must use only post-quantum recipients (see the sharing notes).
-- The file has the same format as the one `age-keygen` writes, so the standard
-  `age` tools can use it too, for example `age -d -i key.txt file.age`.
-- You can also skip this and use an SSH key you already have. Its public key
-  (`~/.ssh/id_ed25519.pub`) works as a recipient.
-
-### Importing a shared file
-
-The other direction: if someone sent you a file encrypted with age (for example
-made by `sedit --share`), `--import` turns it into a `sedit` file under a password
-of your choosing, so you can keep editing it with `sedit`:
-
-```sh
-sedit --import secrets.txt.age -i ~/.ssh/id_ed25519    # writes ./secrets.txt
-sedit --import message.age -i key.txt -o notes/message.txt
-sedit --import team-notes.age                          # passphrase-encrypted file
-```
-
-It decrypts in memory and asks you for the new password (or use `--default` or
-`--custom`, as for a new file). The plaintext never touches the disk.
-
-| Option | Meaning |
-|--------|---------|
-| `-i KEY` | Your private key (see [Generating a key](#generating-a-key)): an age key file (`AGE-SECRET-KEY-...` or a post-quantum `AGE-SECRET-KEY-PQ-...`) or an SSH private key. May be repeated. A passphrase-protected SSH key is fine: you are asked for its passphrase, but only if the file is actually addressed to that key. |
-| *(no `-i`)* | The file must be passphrase-encrypted (`age -p`); you are asked for the passphrase. |
-| `-o OUT` | Where to write the `sedit` file. Default: the input name without `.age`. If the input doesn't end in `.age`, `-o` is required. |
-
-Things to know:
-
-- **It never overwrites anything.** If `OUT` already exists (including a
-  symlink), `sedit` stops and tells you. It also refuses to write over the file it
-  is reading.
-- **Nothing is written on failure.** A wrong key or passphrase, a truncated or
-  tampered file, or a file that isn't an age file at all, all stop before the new
-  password is even asked for.
-- It works on any age file, not just ones from `sedit --share`. Armored (text)
-  files are detected automatically.
-- The input is read from a file, not from stdin, and is limited to 256 MiB.
-- Plugin identities (such as hardware keys) aren't supported.
-- The original `.age` file is left as it is. It stays readable by anyone who has
-  the key, so delete it if you no longer need it.
-
-### Remembering passwords (macOS Keychain)
-
-On macOS you can opt in to storing a file's password in your login keychain:
-
-```sh
-sedit --remember secrets.enc   # prompts once, then stores the password
-sedit secrets.enc              # no prompt from now on (also works with -p, --passwd)
-sedit --forget secrets.enc     # remove it again
-```
-
-Nothing is stored unless you pass `--remember`. If a stored password stops
-working (for example the file was re-keyed elsewhere), `sedit` removes it and
-asks you to type the password. `--passwd` keeps an existing stored entry up to
-date. Entries are keyed by the file's absolute path, so moving or renaming the
-file means running `--remember` again. The file format is unchanged: a file can
-always be opened by typing its password, on any platform.
-
-**This weakens your security, so be aware of what you are trading.**
-
-- The password is stored using the `/usr/bin/security` tool, which is trusted on
-  the items it creates. While your login keychain is unlocked (normally whenever
-  you are logged in), **any program running as your user can read the password
-  without a prompt**, for example with
-  `security find-generic-password -s sedit -a /path/to/file -w`. That includes
-  malware and malicious scripts you run by accident.
-- There is no Touch ID or password prompt per use. Doing that properly would need
-  a code-signed binary with keychain entitlements, which this project
-  deliberately doesn't require.
-- So the practical protection of a remembered file becomes "whoever is logged in
-  as you", not "whoever knows the passphrase". The encryption itself is just as
-  strong; the passphrase is what's exposed.
-- The login keychain file (`~/Library/Keychains/login.keychain-db`) is included
-  in ordinary backups such as Time Machine, and it is protected by your login
-  password.
-- The password is passed to `security` through stdin, so it does not appear in the
-  process list, and is base64-encoded in the keychain, which is encoding, not
-  protection.
-
-Use it for convenience on a machine you trust. Don't use it for files where the
-passphrase is the only thing standing between an attacker with your account and
-the contents. On other platforms `--remember` and `--forget` report that they
-aren't supported.
-
-**Cleaning up stale entries.** A stored password that no longer opens its file is
-removed automatically the next time you use that file. Use
-[`sedit --mv` and `sedit --rm`](#moving-and-deleting-files) to move and delete
-remembered files, and the entries follow along. But if you move or delete such a
-file *with plain `mv` or `rm`*, nothing notices: its entry stays in the keychain,
-still holding a working password that any program running as you can read.
-`sedit` can't list its entries, so clean those up yourself:
-
-```sh
-sedit --forget /old/path/to/secrets.enc
-```
-
-This works when the path has no symlinked directories in it. Entries are stored
-under the fully resolved path, which `sedit` can only work out for a file that
-still exists. If it says "no stored password" for a path you know was
-remembered, give it the fully resolved path instead (for example
-`/private/tmp/...` rather than `/tmp/...`):
-
-```sh
-sedit --forget /private/tmp/old/secrets.enc
-```
-
-You can also delete an entry directly with the `security` tool:
-
-```sh
-security delete-generic-password -s sedit -a /resolved/path/to/secrets.enc
-```
-
-Or open **Keychain Access**, search for `sedit`, and delete the entries you no
-longer need. The default password is stored under the account name `<default>`.
-
-### Default password (macOS Keychain)
-
-For a mix of convenience files and sensitive files, you can store one **default**
-password and decide per file whether to use it:
-
-```sh
-sedit --set-default            # prompts for the default password, stores it
-sedit notes.enc                # new file: asks "[d]efault or [c]ustom?"
-sedit --default todo.enc       # new file with the default, no questions
-sedit --custom bank.enc        # new file with its own password
-sedit --passwd --custom todo.enc    # move a file off the default
-sedit --forget-default
-```
-
-- **Creating a file.** If a default exists and you are at a terminal, you are
-  asked whether the new file uses the default or a custom password. Without a
-  terminal (a script) and without a flag, a custom password is used, so the
-  default is never picked up by accident. `--default` fails if none is set.
-  `--passwd` and `--encrypt` work the same way for the new password.
-- **Opening a file.** `sedit` tries, in order: the file's own entry (from
-  `--remember`), the default, then a prompt. A file with a custom password just
-  fails the default attempt silently and prompts. That costs one extra key
-  derivation (roughly a third of a second with the current settings).
-- **The default is never removed automatically**, because many files rely on it.
-  Per-file entries still are (see above).
-- **Changing the default does not re-key your files.** Files created with the
-  previous default still need the previous password. `--set-default` reminds you
-  when it replaces an existing one.
-- **Files don't record which kind they are.** A sensitive file whose password
-  happens to equal the default will open silently, so give sensitive files a
-  different password and create them with `--custom`.
-
-The security trade-offs of the previous section apply, with a larger blast
-radius: any program running as you can read the default and it opens **every**
-file that uses it.
-
-### Restoring the previous version
-
-```sh
-sedit -p secrets.enc.bak     # inspect it (same password)
-mv secrets.enc.bak secrets.enc
-```
-
-Only one previous version is kept; each save overwrites `FILE.bak`.
-
-### Scripting
-
-When stdin is not a terminal, passwords are read as lines from stdin, one per
-prompt (except with `--write` and `--append`, where stdin carries the data; see
-[Piping data in](#piping-data-in)):
-
-```sh
-echo "$PASSWORD" | sedit -p secrets.enc
-printf '%s\n%s\n' "$OLD" "$NEW" | sedit --passwd secrets.enc   # current, then new
-```
-
-No confirmation prompt is shown in that mode. Beware that passwords in shell
-variables, history and process lists are visible to other tools.
-
-## File format
-
-All integers are big endian.
-
-| Field      | Size | Notes                              |
-|------------|------|------------------------------------|
-| magic      | 6    | `SEDIT\0`                          |
-| version    | 1    | `1`, or `2` if there is a title or description |
-| time       | 4    | Argon2id iterations                |
-| memory     | 4    | Argon2id memory in KiB             |
-| threads    | 1    | Argon2id parallelism               |
-| salt       | 16   | random, fresh on every save        |
-| nonce      | 24   | random, fresh on every save        |
-| title length | 2  | version 2 only                     |
-| description length | 2 | version 2 only                |
-| title, description | n | version 2 only, UTF-8, in the clear |
-| ciphertext | n+16 | XChaCha20-Poly1305, includes tag   |
-
-The header (magic through the description, if there is one) is passed as
-associated data, so a change to the KDF parameters, the title or the description
-is detected. The parameters and the lengths are bounded on read, so a hostile file
-can't force huge allocations.
-
-## Limitations
-
-Read these before relying on `sedit`. It protects data **at rest**. It does not
-defend against malware or an attacker on your machine while the file is open.
-
-- **Plaintext temp file.** While you edit, the plaintext sits in a `0700` temp
-  directory. It is zeroed and deleted afterwards, but on macOS the temp
-  directory is on disk, not RAM, so the data may have reached the SSD. Zeroing
-  can't guarantee otherwise. Using a RAM disk is a stronger option.
-- **Other editors may leak.** Leak protection is built in for vi, vim and nvim
-  only. Editors such as VS Code, Emacs and nano may write backup, swap or
-  recovery files, so configure them yourself. Graphical editors are the worst
-  case: VS Code, for example, keeps its own Local History and hot-exit backups,
-  which can hold plaintext copies of every version you save. That is why `sedit`
-  ignores them unless you set `SEDIT_EDITOR`. A terminal editor with leak
-  protection (vim) is the safer choice for secrets.
-- **Memory is not locked or reliably wiped.** Go's garbage collector can leave
-  copies of the password and plaintext in memory, and memory may be swapped.
-- **Your passphrase is the weak point.** Argon2id slows brute force, but a weak
-  passphrase is still weak.
-- **No integrity beyond one file.** A wrong password and a corrupted file give
-  the same error (`wrong password or corrupted file`), by design.
-- **`FILE.bak` keeps the old password.** After `--passwd`, an existing `.bak` is
-  still encrypted with the *old* password. `sedit` warns you but doesn't delete
-  it. Remove it yourself if the old password was compromised.
-- **Converted plaintext isn't erased.** After `--encrypt`, the original plaintext
-  may remain in freed disk blocks, backups, Time Machine snapshots or editor
-  files. Treat the old contents as exposed, and rotate any credentials in it.
-- **Remembered and default passwords are readable by any process running as
-  you.** See [Remembering passwords](#remembering-passwords-macos-keychain) and
-  [Default password](#default-password-macos-keychain). A leaked default opens
-  every file that uses it. Only use these where that is acceptable.
-- **Single backup generation.** Only the immediately preceding version is kept.
-- **Lock file is advisory and local.** The lock is an `flock` on `.FILE.lock`,
-  which is left on disk (empty) after exit. It is released automatically if
-  `sedit` crashes. It may be unreliable on some network filesystems such as NFS,
-  and it does not protect copies of the file elsewhere. `sedit -p` doesn't take
-  the lock, which is safe because saves are atomic renames.
-- **Unix only.** The lock uses `syscall.Flock`, so it won't build on Windows.
-- **No recovery.** There is no password reset. Lose the passphrase and the data
-  is gone.
-- **Not independently audited.** It uses standard primitives from
-  `golang.org/x/crypto` and no custom cryptography, but the program as a whole
-  hasn't had a security review.
-
-## Development
-
-```sh
-go vet ./...
-go test ./...
-```
-
-### Project layout
-
-The command line is a thin layer over a few small packages, so that other front
-ends can reuse them:
-
-| Package | What it does |
-|---------|--------------|
-| `cmd/sedit` | The command line: argument parsing, prompts, messages, and the commands (edit, share, import, keygen, ...). |
-| `internal/vault` | The file format (XChaCha20-Poly1305 with an Argon2id key), titles and descriptions (files', and folders' hidden label file), the per-file edit lock, atomic writes, backups. Knows nothing about prompts, editors or the Keychain. |
-| `internal/keystore` | Remembering passwords outside the files: the macOS Keychain, or nothing elsewhere. |
-| `internal/unlock` | Opening a file with whichever password is available: its own stored one, then the default, then one the caller asks the user for. |
-| `internal/editor` | Running your editor on a private temp file, with the extra protection and cues for vim. |
-| `internal/fileops` | Moving, deleting and re-keying a file together with its backup and remembered password; making, moving and deleting folders. |
-| `internal/clip` | The system clipboard (`pbcopy` and friends), and copying for a limited time. |
-| `internal/tui` | The terminal interface: file list, locked preview, and the dialogs. |
-| `cmd/sedit-tui` | The `sedit-tui` program: starts the interface. |
-
-`vault`, `keystore` and `editor` don't depend on each other; `unlock` and
-`fileops` use `keystore` and `vault`; `tui` uses them all.
-
-### Publishing a new version
-
-Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)
-whenever a tag starting with `v` is pushed. To publish one:
-
-1. Make sure everything is committed and pushed to `main`, and that the tests
-   pass locally:
-
-   ```sh
-   go vet ./... && go test ./...
-   ```
-
-2. Pick the next version number using [semantic versioning](https://semver.org):
-   `vMAJOR.MINOR.PATCH`. Bump PATCH for fixes, MINOR for new features, and MAJOR
-   for incompatible changes (including changes to the file format).
-
-3. Tag the commit and push the tag:
-
-   ```sh
-   git tag -a v1.2.3 -m "sedit v1.2.3"
-   git push origin v1.2.3
-   ```
-
-4. Watch the run on the repository's **Actions** tab. It runs `go vet` and the
-   tests on Linux and macOS, then builds tarballs for macOS and Linux (arm64 and
-   amd64), writes `SHA256SUMS`, and creates the GitHub release with generated
-   notes. You can edit the notes afterwards on the release page.
-
-A tag containing a hyphen, such as `v1.3.0-rc1`, is published as a pre-release.
-
-To try the build without publishing anything, run the same script locally. It
-writes the tarballs and checksums to `dist/` (git-ignored):
-
-```sh
-scripts/build-release.sh v0.0.0-test
-```
-
-The version printed by `sedit --version` comes from the tag. Don't reuse or move
-a tag that has been published: the Go module proxy caches versions permanently,
-so a moved tag causes checksum errors for anyone who already fetched it. Publish
-a new version instead.
+## Read more
+
+- [The interface](docs/interface.md): the keys, locking, the clipboard, folders,
+  titles and the filter.
+- [Command line](docs/command-line.md): editing, printing, piping, sharing, moving
+  and deleting files, and scripting.
+- [Remembering passwords](docs/keychain.md): the macOS Keychain, per file or as a
+  default.
+- [Security and file format](docs/security.md): what `sedit` protects, what it
+  does not, and how the files are laid out. **Read this before relying on it.**
+- [Development](docs/development.md): project layout, tests and how to publish a
+  version.
 
 ## License
 

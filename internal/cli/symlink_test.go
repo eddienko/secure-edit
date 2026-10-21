@@ -1,23 +1,12 @@
-package main
+package cli
 
 import (
-	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
 	"path/filepath"
 	"testing"
-)
 
-func TestVersionString(t *testing.T) {
-	if versionString() == "" {
-		t.Fatal("empty version")
-	}
-	old := buildVersion
-	buildVersion = "v9.9.9"
-	defer func() { buildVersion = old }()
-	if got := versionString(); got != "v9.9.9" {
-		t.Fatalf("got %q", got)
-	}
-}
+	"github.com/eddienko/secure-edit/internal/vault"
+)
 
 // Editing through a symlink must leave the link in place and act on the target.
 func TestRunThroughSymlink(t *testing.T) {

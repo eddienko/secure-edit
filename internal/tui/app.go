@@ -968,11 +968,11 @@ func (a *App) releaseClipboard() {
 	switch {
 	case !held:
 	case err != nil:
-		fmt.Fprintln(os.Stderr, "sedit-tui: couldn't clear the clipboard:", err)
+		fmt.Fprintln(os.Stderr, "sedit: couldn't clear the clipboard:", err)
 	case r == clip.Cleared:
-		fmt.Fprintln(os.Stderr, "sedit-tui: cleared the clipboard")
+		fmt.Fprintln(os.Stderr, "sedit: cleared the clipboard")
 	case r == clip.LeftAlone:
-		fmt.Fprintln(os.Stderr, "sedit-tui: left the clipboard alone: it no longer held the copied text")
+		fmt.Fprintln(os.Stderr, "sedit: left the clipboard alone: it no longer held the copied text")
 	}
 }
 

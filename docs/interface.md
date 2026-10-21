@@ -1,17 +1,19 @@
-# sedit-tui
+# The interface
 
-The full-screen terminal interface for [`sedit`](../README.md) files.
-
-`sedit-tui` is a full-screen way to browse and manage a folder of `sedit` files.
-It is a separate program, built from the same code as `sedit`, and uses the same
-passwords, Keychain entries and editor settings.
+`sedit` with no file, or with a folder, is a full-screen way to browse and manage
+a folder of encrypted files. It is the same program as the [command line](command-line.md)
+and uses the same passwords, Keychain entries and editor settings.
 
 ```sh
-sedit-tui                  # the current folder
-sedit-tui ~/secrets        # a folder
-sedit-tui --idle 5m ~/secrets
-sedit-tui --clipboard-timeout 10s ~/secrets
+sedit                      # $SEDIT_HOME if it is set, otherwise the current folder
+sedit ~/secrets            # a folder
+sedit --idle 5m ~/secrets
+sedit --clipboard-timeout 10s ~/secrets
 ```
+
+To always open the same place, put `export SEDIT_HOME=~/secrets` in your shell
+profile. A folder given on the command line wins over it. The interface needs a
+terminal: `sedit` with no arguments in a script or a pipe says so.
 
 ```
 ┌ ~/secrets ─────────────────┐┌ vpn.txt  (unlocked, locks in 1:41) ────────────┐
@@ -36,7 +38,7 @@ A file that has a **title** is listed by it, with the file name after it in dim
 text (`▪ Work VPN  vpn.txt`); one without is listed by its name. Titles and
 descriptions are readable without the password (they are stored in the clear, so
 don't put secrets in them): the locked preview shows the description, and `n`
-and `i` set them. See [Titles and descriptions](../README.md#titles-and-descriptions).
+and `i` set them. See [Titles and descriptions](command-line.md#titles-and-descriptions).
 
 **Nothing is decrypted until you ask.** Selecting a file shows `LOCKED` (with its description, if it has one). Press
 **Enter** to unlock it: if its password is stored in the Keychain, or the default
@@ -83,7 +85,7 @@ the description and what is inside (`2 sedit files, 1 folder`) in the preview. T
 are kept in a small hidden file, `.sedit-folder`, inside the folder, so they move
 with it. Unlike a file's, they are not encrypted or authenticated: anyone who can
 write in the folder can change them, and they are for finding your way around, not
-for secrets. The folder you opened `sedit-tui` in can have them, but can't be
+for secrets. The folder you opened can have them, but can't be
 renamed, moved or deleted from the interface. Folders are never deleted while
 they hold anything but this file, `.DS_Store` and empty lock files. The `/`
 filter matches a folder's title and name too, and shows everything in a folder that
@@ -105,7 +107,7 @@ whole decrypted text instead (or `e` to open it in your editor).
 - It is **cleared after 30 seconds**, or whatever `--clipboard-timeout` says
   (at least 1s), and **only if the clipboard still holds that text**: something
   you copied in the meantime is never wiped. Copying again restarts the countdown.
-- Quitting `sedit-tui` clears it at once, and says so.
+- Quitting the interface clears it at once, and says so.
 - The whole text is copied, even past the 1 MiB the preview shows. Binary data and
   empty files are refused.
 - **A secret on the clipboard is a risk.** Clipboard managers may record it, and
@@ -115,14 +117,15 @@ whole decrypted text instead (or `e` to open it in your editor).
   can. (From the command line, `sedit -p FILE | pbcopy` does the same without any
   timer.)
 
-**Colors.** `sedit-tui` uses no colors of its own: everything is drawn in your
+**Colors.** The interface uses no colors of its own: everything is drawn in your
 terminal's default foreground and background, and emphasis comes from bold and
 reverse video (the selected file and the bar at the bottom are reversed) and from
 symbols (`▪ ○ ·`). So it follows your theme, whether light, dark or see-through,
 and nothing can end up unreadable because a color blends into your background.
 
 **What it does not do (yet).** Sharing, importing, key generation and encrypting a
-plain file are only in `sedit`. There is no search inside files, and no mouse.
+plain file are only in the [command line](command-line.md). There is no search
+inside files, and no mouse.
 Files larger than 1 MiB are shown cut off, and binary content is not displayed.
 
 **Security notes.** The interface uses the terminal's alternate screen, so what it
@@ -132,9 +135,9 @@ usual advice applies: lock (`l`) when you step away. The decrypted text and the
 passwords you type are kept in memory that is zeroed on lock, but the terminal
 library's own screen buffer holds what is displayed until it is redrawn. As
 everywhere in `sedit`, a graphical editor is ignored unless you set
-`SEDIT_EDITOR` (see [Choosing an editor](../README.md#choosing-an-editor)).
+`SEDIT_EDITOR` (see [Choosing an editor](command-line.md#choosing-an-editor)).
 
 ---
 
-Back to the [README](../README.md): installation, the `sedit` command line,
-sharing, Keychain support, file format and limitations.
+See also the [README](../README.md), the [command line](command-line.md),
+[remembering passwords](keychain.md) and [security and file format](security.md).
