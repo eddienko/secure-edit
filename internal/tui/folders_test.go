@@ -653,3 +653,15 @@ func TestFilterByAFolderNameToo(t *testing.T) {
 	h.waitFor("march.txt")
 	h.waitGone("other.txt")
 }
+
+func TestTheTopFolderIsListedByItsTitle(t *testing.T) {
+	dir := folderLabelled(t, t.TempDir(), "vault", vault.Meta{Title: "My Vault", Description: "Everything private."})
+	h := newHarness(t, dir, Options{})
+	h.waitFor("My Vault")
+	if _, row := h.leftRow("My Vault"); strings.Contains(row, "vault/") {
+		t.Errorf("the top folder is listed by its title only: %q", row)
+	}
+	h.key(tcell.KeyHome)
+	h.waitFor("My Vault · vault/")
+	h.waitFor("Everything private.")
+}

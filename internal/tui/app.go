@@ -279,7 +279,7 @@ func (a *App) rebuild(selectPath string) {
 	}
 	a.parents = map[*tview.TreeNode]*tview.TreeNode{}
 	a.rows, a.cont, a.painted = map[*tview.TreeNode]*rowText{}, map[*tview.TreeNode]string{}, nil
-	root := a.newNode(Entry{Name: filepath.Base(a.root), Path: a.root, Kind: KindDir})
+	root := a.newNode(Entry{Name: filepath.Base(a.root), Path: a.root, Kind: KindDir, Meta: vault.ReadFolderMeta(a.root)})
 	a.cont[root] = ""
 	a.fill(root)
 	root.SetExpanded(true)
