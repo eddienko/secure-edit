@@ -33,6 +33,15 @@ type Entry struct {
 	Meta vault.Meta // a sedit file's title and description, as the header says
 }
 
+// sortKey is what the list is ordered by: the title if the file has one, since
+// that is what is shown, and the name otherwise.
+func (e Entry) sortKey() string {
+	if t := strings.TrimSpace(e.Meta.Title); t != "" {
+		return strings.ToLower(t)
+	}
+	return strings.ToLower(e.Name)
+}
+
 // KindOf looks at the first bytes of the file at path.
 func KindOf(path string) Kind {
 	f, err := os.Open(path)
@@ -81,7 +90,8 @@ func hidden(name string) bool {
 }
 
 // List returns the visible entries of dir: directories first, then files, each
-// group in case-insensitive name order. Symlinks are followed for the purpose of
+// group in case-insensitive order of what is shown (a file's title, or else its
+// name). Symlinks are followed for the purpose of
 // telling what they point to.
 func List(dir string) ([]Entry, error) {
 	des, err := os.ReadDir(dir)
@@ -112,6 +122,9 @@ func List(dir string) ([]Entry, error) {
 		di, dj := out[i].Kind == KindDir, out[j].Kind == KindDir
 		if di != dj {
 			return di
+		}
+		if ki, kj := out[i].sortKey(), out[j].sortKey(); ki != kj {
+			return ki < kj
 		}
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})

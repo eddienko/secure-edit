@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -67,6 +69,7 @@ type statusBar struct {
 	*tview.Box
 	text  string
 	style tcell.Style
+	hints func(width int) string // what to show when there is no message
 }
 
 func newStatusBar() *statusBar { return &statusBar{Box: tview.NewBox(), style: invert} }
@@ -79,7 +82,40 @@ func (s *statusBar) Draw(screen tcell.Screen) {
 	for i := 0; i < w; i++ {
 		screen.SetContent(x+i, y, ' ', nil, s.style)
 	}
-	drawText(screen, x+1, y, w-2, s.text, s.style)
+	text := s.text
+	if text == "" && s.hints != nil {
+		text = s.hints(w - 2)
+	}
+	drawText(screen, x+1, y, w-2, text, s.style)
+}
+
+// trimTo cuts s to at most width cells, ending in … if anything was cut.
+func trimTo(s string, width int) string {
+	if runewidth.StringWidth(s) <= width {
+		return s
+	}
+	if width < 1 {
+		return ""
+	}
+	return runewidth.Truncate(s, width, "…")
+}
+
+// words says a duration the way a person would: "2 minutes", "30 seconds".
+func words(d time.Duration) string {
+	plural := func(n int, unit string) string {
+		if n == 1 {
+			return "1 " + unit
+		}
+		return fmt.Sprintf("%d %ss", n, unit)
+	}
+	secs := int(d.Round(time.Second) / time.Second)
+	switch {
+	case secs%60 == 0 && secs >= 60:
+		return plural(secs/60, "minute")
+	case secs < 60:
+		return plural(secs, "second")
+	}
+	return plural(secs/60, "minute") + " " + plural(secs%60, "second")
 }
 
 // safeText makes text from a file's header fit for the screen. The title and

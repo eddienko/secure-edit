@@ -1258,7 +1258,10 @@ func TestCopyIsNotLimitedToThePreview(t *testing.T) {
 }
 
 func TestCopyIsMentionedInTheHintsAndTheHelp(t *testing.T) {
-	h := newHarness(t, t.TempDir(), Options{ClipboardTTL: 45 * time.Second})
+	dir := t.TempDir()
+	seditFile(t, dir, "notes.txt", "pw", "x")
+	h := newHarness(t, dir, Options{ClipboardTTL: 45 * time.Second})
+	h.selectFile("notes.txt")
 	h.waitFor("y copy")
 	h.press('?')
 	h.waitFor("copy the whole text to the clipboard (cleared after 45s)")

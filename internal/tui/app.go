@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/mattn/go-runewidth"
 	"github.com/rivo/tview"
 
 	"github.com/eddienko/secure-edit/internal/clip"
@@ -108,6 +109,7 @@ func New(root string, opts Options) (*App, error) {
 	a.reload("")
 	a.app.SetRoot(a.pages, true).SetFocus(a.tree)
 	a.app.SetInputCapture(a.capture)
+	a.status.hints = a.hintsFor
 	a.renderStatus()
 	return a, nil
 }
@@ -296,7 +298,7 @@ func (a *App) refreshPreview() {
 	case a.session != nil && !a.session.Locked() && a.session.Path == e.Path:
 		a.showSession(a.session)
 	case e.Kind == KindSedit:
-		a.prev.SetTitle(" " + e.Name + "  (locked) ")
+		a.prev.SetTitle(a.paneTitle(e.Meta.Title, e.Name, "(locked)"))
 		a.prev.showLocked(e.Meta)
 	case e.Kind == KindAge:
 		a.prev.SetTitle(" " + e.Name + " ")
@@ -315,7 +317,7 @@ func (a *App) refreshPreview() {
 }
 
 func (a *App) showSession(s *Session) {
-	a.prev.showText(s.Plain)
+	a.prev.showText(s.Plain, s.Meta().Description)
 	a.updateTitle()
 }
 
@@ -327,7 +329,23 @@ func (a *App) updateTitle() {
 	if left < 0 {
 		left = 0
 	}
-	a.prev.SetTitle(fmt.Sprintf(" %s  (unlocked, locks in %d:%02d) ", filepath.Base(a.session.Path), int(left.Minutes()), int(left.Seconds())%60))
+	state := fmt.Sprintf("(unlocked, locks in %d:%02d)", int(left.Minutes()), int(left.Seconds())%60)
+	a.prev.SetTitle(a.paneTitle(a.session.Meta().Title, filepath.Base(a.session.Path), state))
+}
+
+// paneTitle is the title of the preview for a sedit file: "Work VPN login ·
+// vpn.txt  (state)", or "vpn.txt  (state)" if the file has no title. The title
+// is cut short, with …, if the pane is too narrow for all of it, so that the
+// file name and the state always show.
+func (a *App) paneTitle(title, name, state string) string {
+	label := tview.Escape(safeText(name, false))
+	if title = safeText(title, false); title != "" {
+		if room := a.prev.width - runewidth.StringWidth(" · "+name+"  "+state) - 2; a.prev.width > 0 && room >= 1 {
+			title = trimTo(title, room)
+		}
+		label = tview.Escape(title) + " · " + label
+	}
+	return " " + label + "  " + state + " "
 }
 
 // short shows paths inside the folder being browsed relative to it; the status
@@ -342,12 +360,52 @@ func (a *App) say(msg string, isErr bool) {
 	a.renderStatus()
 }
 
-const hints = "↑↓ move  ⏎ unlock  e edit  y copy  i info  n new  r rename  d delete  p password  l lock  ? help  q quit"
+// helpTail is always on the hint bar, at the end, whatever else has to go.
+const helpTail = "? help  q quit"
+
+// hintItems are the keys that matter right now, most useful first.
+func (a *App) hintItems() []string {
+	if a.prev.HasFocus() {
+		return []string{"↑↓ scroll", "PgUp/PgDn page", "y copy", "Esc back"}
+	}
+	move := "↑↓ move"
+	e, ok := a.current()
+	switch {
+	case !ok:
+		return []string{"n new"}
+	case e.Kind == KindDir:
+		return []string{move, "→ open", "← close", "n new", "R refresh"}
+	case e.Kind != KindSedit:
+		return []string{move, "n new", "R refresh"}
+	case a.session != nil && !a.session.Locked() && a.session.Path == e.Path:
+		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "p password", "r rename", "d delete", "n new"}
+	}
+	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "n new", "r rename", "d delete", "p password"}
+}
+
+// hintsFor lays the hints out in width cells: as many as fit, in order, with
+// the help and quit keys always last.
+func (a *App) hintsFor(width int) string {
+	text := helpTail
+	room := width - runewidth.StringWidth(helpTail) - 2
+	var items []string
+	for _, it := range a.hintItems() {
+		room -= runewidth.StringWidth(it) + 2
+		if room < 0 {
+			break
+		}
+		items = append(items, it)
+	}
+	if len(items) > 0 {
+		text = strings.Join(items, "  ") + "  " + text
+	}
+	return text
+}
 
 func (a *App) renderStatus() {
 	switch {
 	case a.msg == "":
-		a.status.set(hints, invert)
+		a.status.set("", invert) // the bar shows hints for what is selected
 	case a.msgErr:
 		a.status.set(a.msg, alert)
 	default:
@@ -413,6 +471,12 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyTab:
 		a.app.SetFocus(a.prev)
 		return nil
+	case tcell.KeyPgUp, tcell.KeyPgDn:
+		if a.prev.showsText() { // the text is the thing to page through
+			a.prev.scroll(map[bool]int{true: -1, false: 1}[ev.Key() == tcell.KeyPgUp] * a.prev.page())
+			return nil
+		}
+		return ev
 	case tcell.KeyHome:
 		a.selectEdge(true)
 		return nil
@@ -427,6 +491,18 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 		return nil
 	case tcell.KeyRune:
 		switch ev.Rune() {
+		case 'J', 'K', ' ':
+			if !a.prev.showsText() {
+				return ev
+			}
+			switch ev.Rune() {
+			case 'J':
+				a.prev.scroll(1)
+			case 'K':
+				a.prev.scroll(-1)
+			default:
+				a.prev.scroll(a.prev.page())
+			}
 		case 'g':
 			a.selectEdge(true)
 		case 'G':
@@ -609,16 +685,17 @@ func (a *App) help() {
 		"n        new file      r     rename or move      d  delete",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
-		"Tab      scroll the preview (Esc or Tab comes back)",
+		"J K      scroll the text a line     PgUp PgDn  a page     Space  a page down",
+		"Tab      move into the text to scroll it (Esc or Tab comes back)",
 		"q        quit",
 		"",
 		"A file locks again when you move to another one, or after",
-		fmt.Sprintf("%s without a key press.", a.opts.Idle),
+		fmt.Sprintf("%s without a key press.", words(a.opts.Idle)),
 		"",
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 72, 24)
+	}, "\n"), 78, 25)
 }
 
 // ---- actions ------------------------------------------------------------

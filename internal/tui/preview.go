@@ -23,6 +23,7 @@ type preview struct {
 	*tview.Box
 	message []line // shown when text is nil
 	text    []byte // not owned: it is the session's Plain
+	header  string // shown above the text, with a rule under it: the file's description
 	offset  int    // first visible row
 	rows    int    // total rows at the last width
 	width   int
@@ -77,9 +78,14 @@ func (p *preview) showLocked(m vault.Meta) {
 	p.text, p.message, p.offset = nil, lines, 0
 }
 
-// showText shows decrypted text. The slice is read at every redraw, not copied.
-func (p *preview) showText(text []byte) {
+// maxHeaderRows is how many rows of the description are shown above the text.
+const maxHeaderRows = 3
+
+// showText shows decrypted text, with the file's description pinned above it if
+// header is not empty. The slice is read at every redraw, not copied.
+func (p *preview) showText(text []byte, header string) {
 	p.text, p.message, p.offset = text, nil, 0
+	p.header = safeText(header, true)
 }
 
 // looksBinary reports whether data should be treated as binary rather than text.
@@ -193,6 +199,29 @@ func (p *preview) Draw(screen tcell.Screen) {
 		return
 	}
 
+	// The description, if there is one and the pane is tall enough to spare the
+	// room, stays put above the text, with a rule under it.
+	if p.header != "" && h >= 8 {
+		rows := layout([]byte(p.header), w, nil)
+		shown := rows
+		if shown > maxHeaderRows {
+			shown = maxHeaderRows
+		}
+		layout([]byte(p.header), w, func(row, col int, r rune) {
+			if row < shown {
+				screen.SetContent(x+col, y+row, r, nil, plain) // lined up with the text below
+			}
+		})
+		if rows > shown {
+			screen.SetContent(x+w-1, y+shown-1, '…', nil, plain)
+		}
+		for i := 0; i < w; i++ {
+			screen.SetContent(x+i, y+shown, '─', nil, plain)
+		}
+		y, h = y+shown+1, h-shown-1
+	}
+	p.height = h
+
 	text := p.text
 	note := ""
 	switch {
@@ -219,6 +248,27 @@ func (p *preview) Draw(screen tcell.Screen) {
 	if note != "" {
 		drawText(screen, x, y+h-1, w, note, invert)
 	}
+	// Where you are in a text that doesn't fit, on the bottom border.
+	if p.rows > h {
+		last := p.offset + h
+		if last > p.rows {
+			last = p.rows
+		}
+		label := fmt.Sprintf(" lines %d-%d of %d ", p.offset+1, last, p.rows)
+		bx, by, bw, bh := p.GetRect()
+		drawText(screen, bx+bw-2-runewidth.StringWidth(label), by+bh-1, bw, label, plain)
+	}
+}
+
+// showsText reports whether the pane is showing text that can be scrolled.
+func (p *preview) showsText() bool { return p.text != nil }
+
+// page is how far a page of scrolling goes.
+func (p *preview) page() int {
+	if p.height < 2 {
+		return 1
+	}
+	return p.height - 1
 }
 
 func (p *preview) scroll(delta int) {
@@ -233,10 +283,7 @@ func (p *preview) scroll(delta int) {
 
 func (p *preview) InputHandler() func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
 	return p.WrapInputHandler(func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
-		page := p.height - 1
-		if page < 1 {
-			page = 1
-		}
+		page := p.page()
 		switch event.Key() {
 		case tcell.KeyUp:
 			p.scroll(-1)

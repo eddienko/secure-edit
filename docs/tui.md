@@ -29,6 +29,9 @@ The list shows folders, then files. `▪` is a `sedit` file, `○` an age file (
 it into a `sedit` file with `sedit --import`) and `·` anything else. Backups
 (`.bak`), lock files and dot files are hidden.
 
+Files are in alphabetical order of what is shown: the title if there is one, the
+name otherwise.
+
 A file that has a **title** is listed by it, with the file name after it in dim
 text (`▪ Work VPN  vpn.txt`); one without is listed by its name. Titles and
 descriptions are readable without the password (they are stored in the clear, so
@@ -54,8 +57,22 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `p` | Change the file's password. |
 | `l` | Lock now. |
 | `R` | Re-read the folder from disk. |
-| `Tab` | Scroll the preview (`Esc` or `Tab` returns to the list). `y` works there too. |
+| `J` `K` | Scroll the text a line down or up, without leaving the list. |
+| `PgDn` `PgUp` `Space` | Scroll the text a page, from the list, while a file's text is shown (on a locked file or a folder they page the list as usual). `Space` goes down. |
+| `Tab` | Move into the text to scroll it with the arrow keys (`Esc` or `Tab` returns to the list). `y` works there too. |
 | `?`, `q` | Help, quit. |
+
+**The bar at the bottom** shows the keys that matter for what is selected: a
+folder, a locked file, a file that is open, or the text when you are scrolling it.
+It shows as many as fit, in order of usefulness, and `? help  q quit` is always
+there. Messages replace it for a moment.
+
+**The preview's title.** For a file with a title, the pane's title is the title
+and the file name (`Work VPN login · vpn.txt`) followed by `(locked)`, or by how
+long until it locks once the file is open. The description, if
+there is one, stays pinned above the text (up to three lines, with a rule under
+it). When the text is longer than the pane, `lines 3-16 of 60` is shown on the
+bottom border.
 
 **Locking.** Only one file is unlocked at a time. A file locks again when you move
 to another one, with `l`, when you quit, and after **2 minutes without a key

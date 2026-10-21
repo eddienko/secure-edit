@@ -117,7 +117,7 @@ func TestLockedPreviewShowsTheTitleAndDescriptionWithoutAPassword(t *testing.T) 
 	h.typeText("pw")
 	h.key(tcell.KeyEnter)
 	h.waitFor(secretText)
-	h.notOnScreen("Rotate every 90 days.")
+	h.waitFor("Rotate every 90 days.") // the description stays, above the text
 }
 
 func TestALongDescriptionWraps(t *testing.T) {
@@ -462,7 +462,10 @@ func TestRenameKeepsTheLabels(t *testing.T) {
 }
 
 func TestInfoIsInTheHintsAndTheHelp(t *testing.T) {
-	h := newHarness(t, t.TempDir(), Options{})
+	dir := t.TempDir()
+	seditFile(t, dir, "notes.txt", "pw", "x")
+	h := newHarness(t, dir, Options{})
+	h.selectFile("notes.txt")
 	h.waitFor("i info")
 	h.press('?')
 	h.waitFor("change its title and description")
@@ -514,11 +517,15 @@ func TestListReadsTheLabelsFromTheHeaderOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if es[0].Meta.Title != "T" || len(es[0].Meta.Description) != vault.MaxDescription {
-		t.Errorf("a.txt: %+v", es[0].Meta)
+	byName := map[string]Entry{}
+	for _, e := range es {
+		byName[e.Name] = e
 	}
-	if !es[1].Meta.IsZero() {
-		t.Errorf("b.txt: %+v", es[1].Meta)
+	if m := byName["a.txt"].Meta; m.Title != "T" || len(m.Description) != vault.MaxDescription {
+		t.Errorf("a.txt: %+v", m)
+	}
+	if m := byName["b.txt"].Meta; !m.IsZero() {
+		t.Errorf("b.txt: %+v", m)
 	}
 }
 
