@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/eddienko/secure-edit/internal/clip"
 	"github.com/eddienko/secure-edit/internal/fileops"
 	"github.com/eddienko/secure-edit/internal/keystore"
 	"github.com/eddienko/secure-edit/internal/vault"
@@ -20,11 +22,17 @@ import (
 // DefaultIdle is how long an unlocked file stays unlocked without any key press.
 const DefaultIdle = 2 * time.Minute
 
+// DefaultClipboardTTL is how long copied text stays on the clipboard.
+const DefaultClipboardTTL = 30 * time.Second
+
 // Options configures an App. The zero value is fine for real use.
 type Options struct {
 	Idle      time.Duration // auto-lock after this long without input; DefaultIdle if zero
 	TickEvery time.Duration // how often the idle timer is checked; one second if zero
 	Screen    tcell.Screen  // for tests: a simulated screen
+
+	ClipboardTTL time.Duration  // how long copied text stays on the clipboard; DefaultClipboardTTL if zero
+	Clipboard    clip.Clipboard // for tests: a fake clipboard; the system one if nil
 }
 
 // App is the interface: a tree of files on the left, a locked preview on the
@@ -45,6 +53,9 @@ type App struct {
 	last     time.Time // last key press
 	msg      string
 	msgErr   bool
+
+	holder  *clip.Holder // copies to the clipboard and clears it again; made on first use
+	stopped atomic.Bool  // set when the interface has closed
 }
 
 // New creates the interface for the directory root.
@@ -61,6 +72,9 @@ func New(root string, opts Options) (*App, error) {
 	}
 	if opts.TickEvery <= 0 {
 		opts.TickEvery = time.Second
+	}
+	if opts.ClipboardTTL <= 0 {
+		opts.ClipboardTTL = DefaultClipboardTTL
 	}
 	useTerminalColors() // before any widget is made: they read the theme when created
 	a := &App{
@@ -114,7 +128,9 @@ func (a *App) Run() error {
 		}
 	}()
 	err := a.app.Run()
+	a.stopped.Store(true)
 	a.lock() // never leave secrets behind
+	a.releaseClipboard()
 	return err
 }
 
@@ -316,7 +332,7 @@ func (a *App) say(msg string, isErr bool) {
 	a.renderStatus()
 }
 
-const hints = "↑↓ move  ⏎ unlock  e edit  n new  r rename  d delete  p password  l lock  Tab scroll  ? help  q quit"
+const hints = "↑↓ move  ⏎ unlock  e edit  y copy  n new  r rename  d delete  p password  l lock  ? help  q quit"
 
 func (a *App) renderStatus() {
 	switch {
@@ -377,6 +393,10 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.app.SetFocus(a.tree)
 			return nil
 		}
+		if ev.Key() == tcell.KeyRune && ev.Rune() == 'y' {
+			a.copyCurrent()
+			return nil
+		}
 		return ev
 	}
 	switch ev.Key() {
@@ -407,6 +427,8 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.help()
 		case 'e':
 			a.editCurrent()
+		case 'y':
+			a.copyCurrent()
 		case 'n':
 			a.newFile()
 		case 'r':
@@ -570,6 +592,7 @@ func (a *App) help() {
 		"↑ ↓      move          → ←   open / close a folder",
 		"Enter    unlock and show the file",
 		"e        edit it in your editor (unlocks first)",
+		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
 		"n        new file      r     rename or move      d  delete",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
@@ -582,7 +605,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 72, 22)
+	}, "\n"), 72, 23)
 }
 
 // ---- actions ------------------------------------------------------------
@@ -611,6 +634,7 @@ func (a *App) unlockCurrent(then func(*Session)) {
 		a.say(err.Error(), true)
 	case ok:
 		a.session = s
+		a.showSession(s) // whatever happens next, the pane must not still say LOCKED
 		then(s)
 	default:
 		a.askPassword(s, "", then)
@@ -632,6 +656,7 @@ func (a *App) askPassword(s *Session, errMsg string, then func(*Session)) {
 			return
 		}
 		a.session = s
+		a.showSession(s)
 		then(s)
 	})
 }
@@ -668,6 +693,73 @@ func (a *App) runEditor(s *Session, selectAfter string) {
 		return
 	}
 	a.reload("")
+}
+
+// copyCurrent copies the whole text of the selected file to the clipboard, and
+// clears it again after the configured time (unless something else was copied
+// by then). Like editing, it unlocks the file first if need be.
+func (a *App) copyCurrent() {
+	a.unlockCurrent(func(s *Session) {
+		switch {
+		case looksBinary(s.Plain):
+			a.say("binary data can't be copied as text", true)
+			return
+		case len(s.Plain) == 0:
+			a.say("the file is empty: nothing to copy", true)
+			return
+		}
+		if a.holder == nil {
+			c := a.opts.Clipboard
+			if c == nil {
+				var err error
+				if c, err = clip.System(); err != nil {
+					a.say(err.Error(), true)
+					return
+				}
+			}
+			a.holder = clip.NewHolder(c)
+		}
+		if err := a.holder.Copy(s.Plain, a.opts.ClipboardTTL, a.afterClear); err != nil {
+			a.say("couldn't copy: "+err.Error(), true)
+			return
+		}
+		a.say(fmt.Sprintf("copied %s to the clipboard; it is cleared in %s", filepath.Base(s.Path), a.opts.ClipboardTTL), false)
+	})
+}
+
+// afterClear reports, from the timer's goroutine, what became of the clipboard.
+func (a *App) afterClear(r clip.Result, err error) {
+	if a.stopped.Load() {
+		return
+	}
+	a.app.QueueUpdateDraw(func() {
+		switch r {
+		case clip.Cleared:
+			a.say("clipboard cleared", false)
+		case clip.LeftAlone:
+			a.say("clipboard not cleared: it no longer held the copied text", false)
+		default:
+			a.say("couldn't clear the clipboard: "+err.Error(), true)
+		}
+	})
+}
+
+// releaseClipboard clears what we copied, now that the interface is closing:
+// the timer would die with the process, leaving the text behind.
+func (a *App) releaseClipboard() {
+	if a.holder == nil {
+		return
+	}
+	held, r, err := a.holder.ClearNow()
+	switch {
+	case !held:
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "sedit-tui: couldn't clear the clipboard:", err)
+	case r == clip.Cleared:
+		fmt.Fprintln(os.Stderr, "sedit-tui: cleared the clipboard")
+	case r == clip.LeftAlone:
+		fmt.Fprintln(os.Stderr, "sedit-tui: left the clipboard alone: it no longer held the copied text")
+	}
 }
 
 // newFile asks for a name and a password, then opens the editor on an empty file.

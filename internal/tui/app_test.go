@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1034,4 +1035,253 @@ func TestPopupsHideWhatIsUnderThem(t *testing.T) {
 	h.key(tcell.KeyEnter)
 	h.waitFor("Password:")
 	check("the password box")
+}
+
+// ---- the clipboard ------------------------------------------------------
+
+// fakeClip is an in-memory clipboard. The tests never touch the real one.
+type fakeClip struct {
+	mu   sync.Mutex
+	data []byte
+	sets int
+}
+
+func (f *fakeClip) Set(d []byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.data, f.sets = append([]byte(nil), d...), f.sets+1
+	return nil
+}
+func (f *fakeClip) Get() ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]byte(nil), f.data...), nil
+}
+func (f *fakeClip) Clear() error { f.mu.Lock(); defer f.mu.Unlock(); f.data = nil; return nil }
+func (f *fakeClip) text() string { f.mu.Lock(); defer f.mu.Unlock(); return string(f.data) }
+
+// withFile makes a sedit file whose password is stored, so that unlocking needs no typing.
+func (h *harness) remember(path string) { h.store.m[account(h.t, path)] = []byte("pw") }
+
+func TestCopyKeyCopiesTheWholeText(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText+"\nsecond line\n")
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour})
+	h.remember(path)
+
+	h.selectFile("notes.txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor(secretText)
+	h.press('y')
+	h.waitFor("copied notes.txt to the clipboard")
+	h.waitFor("cleared in 1h0m0s")
+	if got := clipb.text(); got != secretText+"\nsecond line\n" {
+		t.Errorf("clipboard holds %q", got)
+	}
+	// The message says what happened, but never shows the secret.
+	if strings.Contains(h.status(), "launch codes") {
+		t.Errorf("the status message contains the secret: %q", h.status())
+	}
+}
+
+func TestCopyUnlocksFirstWithAStoredPassword(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour})
+	h.remember(path)
+	h.selectFile("notes.txt")
+	h.waitFor("LOCKED")
+	h.press('y') // not unlocked yet
+	h.waitFor("copied notes.txt")
+	h.waitFor(secretText) // and it is shown now, like after e
+	if clipb.text() != secretText {
+		t.Errorf("clipboard holds %q", clipb.text())
+	}
+}
+
+func TestCopyAsksForThePasswordWhenThereIsNone(t *testing.T) {
+	dir := t.TempDir()
+	seditFile(t, dir, "notes.txt", "hunter2", secretText)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour})
+	h.selectFile("notes.txt")
+	h.press('y')
+	h.waitFor("Password:")
+	if clipb.text() != "" {
+		t.Fatal("something was copied before the password was given")
+	}
+	h.typeText("wrong")
+	h.key(tcell.KeyEnter)
+	h.waitFor("Wrong password, try again")
+	if clipb.text() != "" {
+		t.Fatal("something was copied after a wrong password")
+	}
+	h.typeText("hunter2")
+	h.key(tcell.KeyEnter)
+	h.waitFor("copied notes.txt")
+	if clipb.text() != secretText {
+		t.Errorf("clipboard holds %q", clipb.text())
+	}
+}
+
+func TestCopyWorksFromThePreviewToo(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour})
+	h.remember(path)
+	h.selectFile("notes.txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor(secretText)
+	h.key(tcell.KeyTab) // focus the preview, to scroll
+	h.press('y')
+	h.waitFor("copied notes.txt")
+	if clipb.text() != secretText {
+		t.Errorf("clipboard holds %q", clipb.text())
+	}
+}
+
+func TestTheClipboardIsClearedAfterTheTime(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: 500 * time.Millisecond})
+	h.remember(path)
+	h.selectFile("notes.txt")
+	h.press('y')
+	h.waitFor("copied notes.txt")
+	if clipb.text() != secretText {
+		t.Fatalf("clipboard holds %q", clipb.text())
+	}
+	h.waitFor("clipboard cleared")
+	if clipb.text() != "" {
+		t.Errorf("the clipboard still holds %q", clipb.text())
+	}
+}
+
+// Something the user copied meanwhile must not be wiped.
+func TestALaterCopyByTheUserIsNotWiped(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: 500 * time.Millisecond})
+	h.remember(path)
+	h.selectFile("notes.txt")
+	h.press('y')
+	h.waitFor("copied notes.txt")
+	clipb.Set([]byte("the user's own text"))
+	h.waitFor("clipboard not cleared: it no longer held the copied text")
+	if clipb.text() != "the user's own text" {
+		t.Errorf("the clipboard was touched: %q", clipb.text())
+	}
+}
+
+func TestQuittingClearsTheClipboardAtOnce(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour}) // the timer won't fire
+	h.remember(path)
+	h.selectFile("notes.txt")
+	h.press('y')
+	h.waitFor("copied notes.txt")
+	h.press('q')
+	select {
+	case <-h.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the app did not stop")
+	}
+	if clipb.text() != "" {
+		t.Errorf("the clipboard still holds %q after quitting", clipb.text())
+	}
+}
+
+func TestCopyRefusals(t *testing.T) {
+	dir := t.TempDir()
+	blob := seditFile(t, dir, "blob.bin", "pw", "abc\x00\x01def")
+	empty := seditFile(t, dir, "empty.txt", "pw", "")
+	plainFile(t, dir, "readme.md", "plain")
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour})
+	h.remember(blob)
+	h.remember(empty)
+
+	h.selectFile("blob.bin")
+	h.press('y')
+	h.waitFor("binary data can't be copied as text")
+	h.selectFile("empty.txt")
+	h.press('y')
+	h.waitFor("the file is empty: nothing to copy")
+	h.selectFile("readme.md")
+	h.press('y')
+	h.waitFor("select a sedit file first")
+	if clipb.sets != 0 {
+		t.Errorf("the clipboard was written to %d times", clipb.sets)
+	}
+}
+
+func TestCopyWithoutAClipboardToolSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	// No Clipboard given, and no tool on the PATH.
+	h := newHarness(t, dir, Options{ClipboardTTL: time.Hour})
+	h.remember(path)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("DISPLAY", "")
+	t.Setenv("WAYLAND_DISPLAY", "")
+	h.selectFile("notes.txt")
+	h.press('y')
+	h.waitFor("no clipboard tool found")
+}
+
+// What is copied is the whole text, not just what the preview shows.
+func TestCopyIsNotLimitedToThePreview(t *testing.T) {
+	dir := t.TempDir()
+	big := strings.Repeat("0123456789abcdef\n", (maxPreview/17)+5000) // over 1 MiB
+	path := seditFile(t, dir, "big.txt", "pw", big)
+	clipb := &fakeClip{}
+	h := newHarness(t, dir, Options{Clipboard: clipb, ClipboardTTL: time.Hour})
+	h.remember(path)
+	h.selectFile("big.txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor("cut off")
+	h.press('y')
+	h.waitFor("copied big.txt")
+	if got := clipb.text(); got != big {
+		t.Errorf("copied %d bytes, want all %d", len(got), len(big))
+	}
+}
+
+func TestCopyIsMentionedInTheHintsAndTheHelp(t *testing.T) {
+	h := newHarness(t, t.TempDir(), Options{ClipboardTTL: 45 * time.Second})
+	h.waitFor("y copy")
+	h.press('?')
+	h.waitFor("copy the whole text to the clipboard (cleared after 45s)")
+}
+
+// Whatever unlocks a file, the preview must show it: it must never say LOCKED
+// while the file is open in memory.
+func TestThePreviewNeverSaysLockedForAnUnlockedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	h := newHarness(t, dir, Options{Clipboard: &fakeClip{}, ClipboardTTL: time.Hour})
+	h.remember(path)
+	useEditor(t, "true\n") // the editor changes nothing and closes at once
+
+	for _, key := range []rune{'y', 'e', 'p'} {
+		h.selectFile("notes.txt")
+		h.press('l') // lock it again
+		h.waitFor("LOCKED")
+		h.press(key)
+		h.waitFor(secretText)
+		h.notOnScreen("LOCKED")
+		if key == 'p' { // this one waits for a new password: cancel it
+			h.key(tcell.KeyEscape)
+			h.waitGone("Which password")
+		}
+		h.key(tcell.KeyEscape)
+		h.settle()
+	}
 }

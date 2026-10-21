@@ -29,9 +29,10 @@ func version() string {
 func main() {
 	fs := flag.NewFlagSet("sedit-tui", flag.ContinueOnError)
 	idle := fs.Duration("idle", tui.DefaultIdle, "lock an unlocked file after this long without a key press")
+	clipTTL := fs.Duration("clipboard-timeout", tui.DefaultClipboardTTL, "clear text copied with y from the clipboard after this long")
 	showVersion := fs.Bool("version", false, "show the version")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `usage: sedit-tui [--idle DURATION] [DIR]
+		fmt.Fprintln(os.Stderr, `usage: sedit-tui [--idle DURATION] [--clipboard-timeout DURATION] [DIR]
 
 A terminal interface for sedit files: a list of files on the left and, on the
 right, a preview that stays locked until you press Enter. DIR is the folder to
@@ -57,7 +58,11 @@ show (default: the current one). Press ? for the keys.`)
 		fmt.Fprintln(os.Stderr, "sedit-tui: --idle must be at least 1s")
 		os.Exit(2)
 	}
-	app, err := tui.New(dir, tui.Options{Idle: *idle})
+	if *clipTTL < time.Second {
+		fmt.Fprintln(os.Stderr, "sedit-tui: --clipboard-timeout must be at least 1s")
+		os.Exit(2)
+	}
+	app, err := tui.New(dir, tui.Options{Idle: *idle, ClipboardTTL: *clipTTL})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sedit-tui:", err)
 		os.Exit(1)
