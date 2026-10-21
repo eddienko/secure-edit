@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 
 	"github.com/eddienko/secure-edit/internal/keystore"
 	"github.com/eddienko/secure-edit/internal/vault"
@@ -139,9 +140,26 @@ func (h *harness) press(r rune) { h.sim.InjectKey(tcell.KeyRune, r, tcell.ModNon
 // selectFile moves the selection to the entry with this name.
 func (h *harness) selectFile(name string) {
 	h.t.Helper()
-	h.waitFor(name)
 	name = strings.TrimSuffix(name, "/") // a folder is drawn with a slash, named without
-	h.key(tcell.KeyHome)                 // start from the top, so the order of entries doesn't matter
+	// A titled entry is listed by its title, so its name may not be on screen:
+	// wait until the entry is in the tree instead.
+	has := func() (found bool) {
+		h.do(func() {
+			h.a.tree.GetRoot().Walk(func(n, _ *tview.TreeNode) bool {
+				if e, ok := n.GetReference().(*Entry); ok && e.Name == name {
+					found = true
+				}
+				return n.IsExpanded()
+			})
+		})
+		return found
+	}
+	for deadline := time.Now().Add(4 * time.Second); !has(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("%q is not in the list:\n%s", name, h.screen())
+		}
+	}
+	h.key(tcell.KeyHome) // start from the top, so the order of entries doesn't matter
 	h.settle()
 	for i := 0; i < 50; i++ {
 		var cur string

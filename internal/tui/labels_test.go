@@ -41,34 +41,20 @@ func (h *harness) rowWith(text string) []cellInfo {
 	return nil
 }
 
-func TestListShowsTheTitleWithTheFileNameBesideIt(t *testing.T) {
+func TestListShowsTheTitleOfATitledFileAndTheNameOtherwise(t *testing.T) {
 	dir := t.TempDir()
 	labelledFile(t, dir, "vpn.txt", "pw", secretText, vault.Meta{Title: "Work VPN login"})
 	seditFile(t, dir, "notes.txt", "pw", secretText)
 	h := newHarness(t, dir, Options{})
 	h.waitFor("▪ Work VPN login")
-	h.waitFor("▪ notes.txt") // no title: just the name, as before
-
-	h.settle()
-	row := h.rowWith("Work VPN login")
-	var line strings.Builder
-	for _, c := range row {
-		line.WriteRune(c.r)
+	h.waitFor("▪ notes.txt") // no title: its name
+	// The name of the titled file is not in the list: it is in the pane's title
+	// once the file is selected, and v shows it under the title.
+	if _, row := h.leftRow("Work VPN login"); strings.Contains(row, "vpn.txt") {
+		t.Errorf("the list shows the title only: %q", row)
 	}
-	if !strings.Contains(line.String(), "Work VPN login  vpn.txt") {
-		t.Errorf("the file name should follow the title:\n%s", h.screen())
-	}
-	// The name is dim and the title is not, so they can be told apart without
-	// any colour.
-	titleAt := strings.Index(line.String(), "Work")
-	nameAt := strings.Index(line.String(), "vpn.txt")
-	titleCol, nameCol := len([]rune(line.String()[:titleAt])), len([]rune(line.String()[:nameAt]))
-	if row[titleCol].attr&tcell.AttrDim != 0 {
-		t.Error("the title is dim")
-	}
-	if row[nameCol].attr&tcell.AttrDim == 0 {
-		t.Error("the file name is not dim")
-	}
+	h.selectFile("vpn.txt")
+	h.waitFor("Work VPN login · vpn.txt  (locked)")
 	h.onlyTerminalColours("a list with titles")
 }
 

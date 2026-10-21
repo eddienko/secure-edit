@@ -95,8 +95,8 @@ profile. Anything else, or leaving it unset, keeps the banner.
 
 A file can have a **title** (a short name for it, one line, up to 200 bytes) and a
 **description** (a few lines, up to 2000 bytes). the [interface](interface.md) lists a file by its
-title, with the file name after it in dim text, and shows the description in the
-preview while the file is locked.
+title (with `v` the name goes under it) and shows the description in the preview
+while the file is locked.
 
 ```sh
 sedit --title "Work VPN" --description "Office VPN login; rotate every 90 days" vpn.txt

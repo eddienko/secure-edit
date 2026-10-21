@@ -55,21 +55,21 @@ func (h *harness) openFolder(name string) {
 	h.key(tcell.KeyRight)
 }
 
-func TestTheListStartsOnOneLineAndVSwitches(t *testing.T) {
+func TestTheListStartsWithTitlesOnlyAndVShowsTheNamesUnderThem(t *testing.T) {
 	h := newHarness(t, twoLineTree(t), Options{})
 	h.openFolder("kubernetes/")
-	h.waitFor("▪ Alertmanager  alertmanager") // one line: title and name together
-	h.press('v')
-	h.waitFor("two-line list")
 	h.waitFor("▪ Alertmanager")
-	h.notOnScreen("▪ Alertmanager  alertmanager")
+	h.notOnScreen("alertmanager.yaml") // titles only: no name, beside or under
+	h.press('v')
+	h.waitFor("shows its name under its title")
+	h.waitFor("alertmanager.yaml")
 	i, _ := h.leftRow("▪ Alertmanager")
 	if name := h.leftRows()[i+1]; !strings.Contains(name, "alertmanager.yaml") {
 		t.Errorf("the name should be on the row under the title:\n%s", h.screen())
 	}
 	h.press('v')
-	h.waitFor("one-line list")
-	h.waitFor("▪ Alertmanager  alertmanager")
+	h.waitFor("titles only")
+	h.waitGone("alertmanager.yaml")
 }
 
 func TestTwoLineListOnlyTitledFilesGetASecondRow(t *testing.T) {
@@ -90,8 +90,8 @@ func TestTwoLineListOnlyTitledFilesGetASecondRow(t *testing.T) {
 	if count("notes.txt") != 1 || count("readme.md") != 1 {
 		t.Errorf("an untitled file is listed on one row:\n%s", strings.Join(rows, "\n"))
 	}
-	// A titled folder keeps its name beside the title.
-	if i, row := h.leftRow("Kubernetes"); !strings.Contains(row, "Kubernetes  kubernetes/") {
+	// A titled folder is listed by its title in either mode.
+	if i, row := h.leftRow("Kubernetes"); strings.Contains(row, "kubernetes/") {
 		t.Errorf("row %d: %q", i, row)
 	}
 	// The name is under the title, starting in the same column.
@@ -269,7 +269,7 @@ func TestTwoLineTitlesStayEscapedAndSafe(t *testing.T) {
 func TestVIsInTheHelp(t *testing.T) {
 	h := newHarness(t, t.TempDir(), Options{})
 	h.press('?')
-	h.waitFor("one line or on two")
+	h.waitFor("name under its title, or only the title")
 }
 
 func TestTwoLineChangeOfTheSelectionLocksAsBefore(t *testing.T) {

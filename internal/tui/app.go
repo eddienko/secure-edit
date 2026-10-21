@@ -167,22 +167,22 @@ func treeTitle(root string) string {
 
 // ---- the file tree ------------------------------------------------------
 
-// label is how an entry appears in the list. Names and titles come from the
-// disk, so they are escaped: tview would take a "[red]" in them for a style.
-// A file with a title is listed by it, with the file's name after it in dim
-// text so that it can still be told apart on disk; "dim" is an attribute, so it
-// follows the terminal's colours like everything else.
+// label is how an entry appears in the list: its title if it has one, and its
+// name otherwise. (The two-line list, v, puts the name of a titled file on a row
+// of its own under the title.) Names and titles come from the disk, so they are
+// escaped: tview would take a "[red]" in them for a style.
 func (a *App) label(e Entry) (string, tcell.Style) {
 	name := tview.Escape(safeText(e.Name, false))
+	title := tview.Escape(safeText(e.Meta.Title, false))
 	switch e.Kind {
 	case KindDir:
-		if title := safeText(e.Meta.Title, false); title != "" {
-			return tview.Escape(title) + "  [::d]" + name + "/[::D]", bold
+		if title != "" {
+			return title, bold
 		}
 		return name + "/", bold
 	case KindSedit:
-		if title := safeText(e.Meta.Title, false); title != "" {
-			return "▪ " + tview.Escape(title) + "  [::d]" + name + "[::D]", plain
+		if title != "" {
+			return "▪ " + title, plain
 		}
 		return "▪ " + name, plain
 	case KindAge:
@@ -808,7 +808,7 @@ func (a *App) help() {
 		"r        rename        d     delete (a folder only if empty)",
 		"p        change its password",
 		"l        lock now      R     re-read the folder",
-		"v        list titled files on one line or on two (title, then name)",
+		"v        show a titled file's name under its title, or only the title",
 		"J K      scroll the text a line     PgUp PgDn  a page     Space  a page down",
 		"Tab      move into the text to scroll it (Esc or Tab comes back)",
 		"q        quit",

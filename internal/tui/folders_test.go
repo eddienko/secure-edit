@@ -58,25 +58,17 @@ func TestAFolderWithATitleIsListedByIt(t *testing.T) {
 	folderLabelled(t, dir, "banking", vault.Meta{Title: "Banking and cards", Description: "All the money things.\nSecond line."})
 	os.Mkdir(filepath.Join(dir, "plain"), 0o700)
 	h := newHarness(t, dir, Options{})
-	h.waitFor("Banking and cards  banking/")
+	h.waitFor("Banking and cards")
 	h.waitFor("plain/") // no title: just the name, as before
+	// The list shows the title, not the name; the name is in the pane's title.
+	if _, row := h.leftRow("Banking and cards"); strings.Contains(row, "banking/") {
+		t.Errorf("a titled folder is listed by its title only: %q", row)
+	}
 	h.selectFile("banking/")
 	h.waitFor("Banking and cards · banking/") // the pane's title
 	h.waitFor("All the money things.")
 	h.waitFor("Second line.")
 	h.waitFor("Empty folder.")
-
-	// The name after the title is dim, the title is not.
-	h.settle()
-	row := h.rowWith("Banking and cards  banking/")[:34]
-	var line strings.Builder
-	for _, c := range row {
-		line.WriteRune(c.r)
-	}
-	nameAt := len([]rune(line.String()[:strings.Index(line.String(), "banking/")]))
-	if row[nameAt].attr&tcell.AttrDim == 0 {
-		t.Error("the folder name after the title is not dim")
-	}
 	h.onlyTerminalColours("a folder with a title")
 }
 
@@ -152,7 +144,10 @@ func TestNewFolderIsOneBoxAndMakesAPrivateFolder(t *testing.T) {
 	if m := vault.ReadFolderMeta(path); m != (vault.Meta{Title: "Banking", Description: "accounts\nand cards"}) {
 		t.Errorf("labels %+v", m)
 	}
-	h.waitFor("Banking  bank/")
+	h.waitFor("Banking")
+	if _, row := h.leftRow("Banking"); strings.Contains(row, "bank/") {
+		t.Errorf("the list shows the title only: %q", row)
+	}
 	if got := h.selected(); got != "bank" {
 		t.Errorf("selected %q, want the new folder", got)
 	}
@@ -235,7 +230,10 @@ func TestInfoOnAFolderNeedsNoPassword(t *testing.T) {
 	if m := vault.ReadFolderMeta(path); m != (vault.Meta{Title: "New", Description: "line one"}) {
 		t.Errorf("labels %+v", m)
 	}
-	h.waitFor("New  bank/")
+	h.waitFor("New")
+	if _, row := h.leftRow("New"); strings.Contains(row, "bank/") {
+		t.Errorf("the list shows the title only: %q", row)
+	}
 }
 
 func TestInfoOnAFolderCanClearAndKeepsOnEscape(t *testing.T) {
@@ -317,7 +315,10 @@ func TestRenameAFolderKeepsEverythingInItAndItsOpenState(t *testing.T) {
 	}
 	h.waitFor("▪ a.txt") // still open, with its subfolder
 	h.waitFor("▪ b.txt")
-	h.waitFor("Work  job/") // the title came along
+	h.waitFor("Work") // the title came along
+	if _, row := h.leftRow("Work"); strings.Contains(row, "job/") {
+		t.Errorf("the list shows the title only: %q", row)
+	}
 	if got := h.selected(); got != "job" {
 		t.Errorf("selected %q", got)
 	}
@@ -534,7 +535,7 @@ func TestMoveAFolderWithItsFilesAndPasswords(t *testing.T) {
 	if m := vault.ReadFolderMeta(moved); m.Title != "Work" {
 		t.Errorf("labels did not come: %+v", m)
 	}
-	h.waitFor("Work  work/")
+	h.waitFor("Work")
 	if got := h.selected(); got != "work" {
 		t.Errorf("selected %q", got)
 	}
@@ -631,8 +632,8 @@ func TestFilterShowsEverythingInAFolderThatMatches(t *testing.T) {
 	seditFile(t, dir, "bank-note.txt", "pw", "x") // matches by name, in the top folder
 	h := newHarness(t, dir, Options{})
 	h.typeFilter("bank")
-	h.waitFor("Banking  x1/") // matched by title
-	h.waitFor("visa.txt")     // does not match "bank", but is in a folder that does
+	h.waitFor("Banking")  // matched by title
+	h.waitFor("visa.txt") // does not match "bank", but is in a folder that does
 	h.waitFor("cards/")
 	h.waitFor("amex.txt")
 	h.waitFor("bank-note.txt")

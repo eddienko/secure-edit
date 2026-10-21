@@ -20,7 +20,7 @@ terminal: `sedit` with no arguments in a script or a pipe says so.
 │ secrets/                   ││ host=vpn.example.com                           │
 │ ├── personal/              ││ user=admin                                     │
 │ ├── work/                  ││ token=...                                      │
-│ ├── ▪ Work VPN  vpn.txt    ││                                                │
+│ ├── ▪ Work VPN             ││                                                │
 │ ├── · readme.md            ││                                                │
 │ └── ○ team.age             ││                                                │
 └────────────────────────────┘└────────────────────────────────────────────────┘
@@ -34,8 +34,10 @@ it into a `sedit` file with `sedit --import`) and `·` anything else. Backups
 Files are in alphabetical order of what is shown: the title if there is one, the
 name otherwise.
 
-A file that has a **title** is listed by it, with the file name after it in dim
-text (`▪ Work VPN  vpn.txt`); one without is listed by its name. Titles and
+A file that has a **title** is listed by it (`▪ Work VPN`); one without is listed
+by its name. The name of the selected file is in the preview's title
+(`Work VPN · vpn.txt`), and pressing `v` shows every titled file's name under its
+title, in dim text. Titles and
 descriptions are readable without the password (they are stored in the clear, so
 don't put secrets in them): the locked preview shows the description, and `n`
 and `i` set them. See [Titles and descriptions](command-line.md#titles-and-descriptions).
@@ -61,7 +63,7 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `d` | Delete a file, after a confirmation that defaults to Cancel; its `.bak` and stored password go too. A folder can be deleted only when it is empty (a leftover `.DS_Store` doesn't count); otherwise the bar says what is in it. |
 | `p` | Change the file's password. |
 | `l` | Lock now. |
-| `v` | Switch the list between one line per file (`▪ Work VPN  vpn.txt`) and **two lines** for a file with a title: the title, and under it the file name in dim text. Files without a title stay on one line, and a folder keeps its name beside its title. The list starts on one line each time. |
+| `v` | Show the names of titled files under their titles, in dim text, or go back to titles only. The list starts with titles only each time. A file without a title stays on one row, and a folder is listed by its title in both. |
 | `R` | Re-read the folder from disk. |
 | `J` `K` | Scroll the text a line down or up, without leaving the list. |
 | `PgDn` `PgUp` `Space` | Scroll the text a page, from the list, while a file's text is shown (on a locked file or a folder they page the list as usual). `Space` goes down. |
@@ -81,7 +83,8 @@ it). When the text is longer than the pane, `lines 3-16 of 60` is shown on the
 bottom border.
 
 **Folders.** A folder can have a title and description like a file, shown the same
-way: `Banking and cards  banking/` in the list, the title in the preview's title,
+way: `Banking and cards` in the list (the folder's name is in the preview's title),
+the title in the preview's title,
 the description and what is inside (`2 sedit files, 1 folder`) in the preview. They
 are kept in a small hidden file, `.sedit-folder`, inside the folder, so they move
 with it. Unlike a file's, they are not encrypted or authenticated: anyone who can

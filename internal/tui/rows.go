@@ -4,8 +4,9 @@ import (
 	"github.com/rivo/tview"
 )
 
-// The two-line list. A file with a title is listed on two rows: its title, and
-// under it its name in dim text. The tree widget draws one row per node, so the
+// The two-line list. The list normally shows a file's title, or its name if it
+// has none. In the two-line list a file with a title is listed on two rows: its
+// title, and under it its name in dim text. The tree widget draws one row per node, so the
 // name is a second node under the title's, which can't be selected (the arrow
 // keys skip it), and the guide lines are drawn here, as text, because the
 // widget's own would join the name row to the tree as if it were another file.
@@ -33,9 +34,6 @@ func (a *App) styleRow(parent, child *tview.TreeNode, e Entry, last bool) {
 
 	text, _ := a.label(e)
 	title := safeText(e.Meta.Title, false)
-	if e.Kind == KindSedit && title != "" {
-		text = "▪ " + tview.Escape(title) // the name goes on the next row
-	}
 	r := &rowText{normal: pc + branch + text, selected: pc + branch + "[::r]" + text}
 	if e.Kind == KindSedit && title != "" {
 		name := tview.Escape(safeText(e.Name, false))
@@ -80,8 +78,8 @@ func (a *App) toggleLayout() {
 	a.tree.SetGraphics(!a.twoLine).SetAlign(a.twoLine) // see the top of this file: the guides are ours
 	a.rebuild("")
 	if a.twoLine {
-		a.say("two-line list: a titled file shows its name under the title (v switches back)", false)
+		a.say("a titled file shows its name under its title (v switches back)", false)
 	} else {
-		a.say("one-line list (v switches to two lines)", false)
+		a.say("titles only (v shows the names under them)", false)
 	}
 }
