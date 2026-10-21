@@ -49,6 +49,8 @@ type App struct {
 	pages  *tview.Pages
 	tree   *tview.TreeView
 	prev   *preview
+	body   *tview.Flex    // the list and the preview (or the built-in editor)
+	ed     *builtinEditor // the built-in editor, while it is open
 	status *statusBar
 
 	root string
@@ -127,6 +129,7 @@ func New(root string, opts Options) (*App, error) {
 	body := tview.NewFlex().
 		AddItem(a.tree, 0, 1, true).
 		AddItem(a.prev, 0, 2, false)
+	a.body = body
 	main := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(body, 0, 1, true).
 		AddItem(a.status, 1, 0, false)
@@ -461,6 +464,9 @@ const helpTail = "? help  q quit"
 
 // hintItems are the keys that matter right now, most useful first.
 func (a *App) hintItems() []string {
+	if a.ed != nil {
+		return []string{"^S save", "^F find", "F3 next", "^G line", "^T numbers", "Esc close"}
+	}
 	if a.prev.HasFocus() {
 		return []string{"↑↓ scroll", "PgUp/PgDn page", "y copy", "Esc back"}
 	}
@@ -533,6 +539,7 @@ func (a *App) renderStatus() {
 
 // lock wipes the unlocked file from memory and shows the locked view again.
 func (a *App) lock() {
+	a.endBuiltin()
 	if a.session != nil {
 		a.session.Wipe()
 		a.session = nil
@@ -545,6 +552,10 @@ func (a *App) lock() {
 // tick runs every second: it counts down the idle timer.
 func (a *App) tick() {
 	if a.session == nil || a.session.Locked() {
+		return
+	}
+	if a.ed != nil && a.ed.dirty {
+		a.editTitle() // unsaved changes are not thrown away by the idle timer
 		return
 	}
 	if time.Since(a.last) >= a.opts.Idle {
@@ -571,6 +582,9 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 	if a.msg != "" {
 		a.msg = ""
 		a.renderStatus()
+	}
+	if a.ed != nil && a.inMain() {
+		return a.editKey(ev)
 	}
 	if !a.inMain() {
 		return ev // a dialog is open: it handles its own keys
@@ -643,6 +657,8 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.help()
 		case 'e':
 			a.editCurrent()
+		case 'E':
+			a.editBuiltin()
 		case 'y':
 			a.copyCurrent()
 		case 'i':
@@ -741,6 +757,10 @@ func (a *App) openDialog(name string, p tview.Primitive, w, h int) {
 
 func (a *App) closeDialog(name string) {
 	a.pages.RemovePage(name)
+	if a.ed != nil {
+		a.app.SetFocus(a.ed.area) // back to the text being edited
+		return
+	}
 	a.app.SetFocus(a.tree)
 }
 
@@ -818,6 +838,9 @@ func (a *App) help() {
 		"↑ ↓      move          → ←   open / close a folder",
 		"Enter    unlock and show the file",
 		"e        edit it in your editor (unlocks first)",
+		"E        edit it here, in the built-in editor (Ctrl-S saves, Esc closes,",
+		"         Ctrl-F finds, F3 finds the next, Ctrl-G goes to a line,",
+		"         Ctrl-T shows line numbers)",
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
 		"i        change its title and description (they show while locked)",
 		"/        filter the list by title or name (Enter keeps it, Esc clears)",
