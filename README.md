@@ -136,6 +136,8 @@ go build -o sedit ./cmd/sedit
   does not, and how the files are laid out. **Read this before relying on it.**
 - [Development](docs/development.md): project layout, tests and how to publish a
   version.
+- [Roadmap](docs/roadmap.md): ideas for later, such as a recovery key for a forgotten
+  password.
 
 ## License
 
