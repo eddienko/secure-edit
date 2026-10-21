@@ -34,7 +34,7 @@ type App struct {
 	pages  *tview.Pages
 	tree   *tview.TreeView
 	prev   *preview
-	status *tview.TextView
+	status *statusBar
 
 	root string
 	opts Options
@@ -62,11 +62,12 @@ func New(root string, opts Options) (*App, error) {
 	if opts.TickEvery <= 0 {
 		opts.TickEvery = time.Second
 	}
+	useTerminalColors() // before any widget is made: they read the theme when created
 	a := &App{
 		app:      tview.NewApplication(),
 		pages:    tview.NewPages(),
 		prev:     newPreview(),
-		status:   tview.NewTextView().SetDynamicColors(true),
+		status:   newStatusBar(),
 		root:     root,
 		opts:     opts,
 		expanded: map[string]bool{root: true},
@@ -133,21 +134,21 @@ func treeTitle(root string) string {
 
 // ---- the file tree ------------------------------------------------------
 
-func (a *App) label(e Entry) (string, tcell.Color) {
+func (a *App) label(e Entry) (string, tcell.Style) {
 	switch e.Kind {
 	case KindDir:
-		return e.Name + "/", tcell.ColorLightSkyBlue
+		return e.Name + "/", bold
 	case KindSedit:
-		return "▪ " + e.Name, tcell.ColorGreen
+		return "▪ " + e.Name, plain
 	case KindAge:
-		return "○ " + e.Name, tcell.ColorYellow
+		return "○ " + e.Name, plain
 	}
-	return "· " + e.Name, tcell.ColorGray
+	return "· " + e.Name, plain
 }
 
 func (a *App) newNode(e Entry) *tview.TreeNode {
-	text, color := a.label(e)
-	n := tview.NewTreeNode(text).SetReference(&e).SetColor(color).SetSelectable(true)
+	text, style := a.label(e)
+	n := tview.NewTreeNode(text).SetReference(&e).SetTextStyle(style).SetSelectedTextStyle(invert).SetSelectable(true)
 	if e.Kind == KindDir {
 		n.SetExpanded(false)
 	}
@@ -320,11 +321,11 @@ const hints = "↑↓ move  ⏎ unlock  e edit  n new  r rename  d delete  p pas
 func (a *App) renderStatus() {
 	switch {
 	case a.msg == "":
-		a.status.SetText("[gray]" + tview.Escape(hints))
+		a.status.set(hints, invert)
 	case a.msgErr:
-		a.status.SetText("[red]" + tview.Escape(a.msg))
+		a.status.set(a.msg, alert)
 	default:
-		a.status.SetText("[green]" + tview.Escape(a.msg))
+		a.status.set(a.msg, invert) // same bar, so it replaces the hints in place
 	}
 }
 
@@ -507,9 +508,10 @@ func (a *App) secretDialog(title, label, errMsg string, done func(pw []byte, ok 
 // inputDialog asks for a line of text.
 func (a *App) inputDialog(title, label, initial string, done func(text string, ok bool)) {
 	in := tview.NewInputField().SetLabel(label + " ").SetText(initial).SetFieldWidth(0)
+	in.SetFieldStyle(tcell.StyleDefault.Underline(true)).SetLabelStyle(plain)
 	box := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(in, 1, 0, true).
-		AddItem(tview.NewTextView().SetText("Enter to confirm, Esc to cancel").SetTextColor(tcell.ColorGray), 1, 0, false)
+		AddItem(tview.NewTextView().SetText("Enter to confirm, Esc to cancel"), 1, 0, false)
 	box.SetBorder(true).SetTitle(" "+title+" ").SetBorderPadding(1, 0, 1, 1)
 	in.SetDoneFunc(func(key tcell.Key) {
 		text := in.GetText()
@@ -528,7 +530,14 @@ func (a *App) inputDialog(title, label, initial string, done func(text string, o
 // choiceDialog shows a question with buttons; done gets the index of the one
 // pressed, or -1 for Esc. The first button has the focus, so put the safe one first.
 func (a *App) choiceDialog(text string, buttons []string, done func(index int)) {
-	m := tview.NewModal().SetText(text).AddButtons(buttons)
+	// Buttons are drawn as [ label ], and the focused one in reverse video, so
+	// they can be told apart without any colour.
+	labels := make([]string, len(buttons))
+	for i, b := range buttons {
+		labels[i] = "[ " + b + " ]"
+	}
+	m := tview.NewModal().SetText(text).AddButtons(labels).
+		SetButtonStyle(plain).SetButtonActivatedStyle(invert)
 	m.SetDoneFunc(func(i int, _ string) {
 		a.closeDialog("choice")
 		done(i)

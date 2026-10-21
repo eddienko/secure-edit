@@ -779,3 +779,174 @@ func TestTreeTitleIsShort(t *testing.T) {
 		}
 	}
 }
+
+// ---- colours ------------------------------------------------------------
+
+type cellInfo struct {
+	r      rune
+	fg, bg tcell.Color
+	attr   tcell.AttrMask
+}
+
+// grid reads every cell of the screen, with its colours and attributes.
+func (h *harness) grid() (g [][]cellInfo) {
+	h.do(func() {
+		cells, w, ht := h.sim.GetContents()
+		for y := 0; y < ht; y++ {
+			row := make([]cellInfo, w)
+			for x := 0; x < w; x++ {
+				c := cells[y*w+x]
+				fg, bg, attr := c.Style.Decompose()
+				r := ' '
+				if len(c.Runes) > 0 {
+					r = c.Runes[0]
+				}
+				row[x] = cellInfo{r, fg, bg, attr}
+			}
+			g = append(g, row)
+		}
+	})
+	return g
+}
+
+// onlyTerminalColours fails if any cell on screen has a colour of its own. The
+// interface must look right in every terminal theme, so it may only use the
+// terminal's default foreground and background.
+func (h *harness) onlyTerminalColours(state string) {
+	h.t.Helper()
+	h.settle()
+	for y, row := range h.grid() {
+		for x, c := range row {
+			if c.fg != tcell.ColorDefault || c.bg != tcell.ColorDefault {
+				h.t.Fatalf("%s: the cell at column %d, row %d (%q) has colours fg=%v bg=%v; only the terminal's defaults are allowed\n%s",
+					state, x, y, c.r, c.fg, c.bg, h.screen())
+			}
+		}
+	}
+}
+
+func TestUsesOnlyTheTerminalsOwnColours(t *testing.T) {
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", secretText)
+	blob := seditFile(t, dir, "blob.bin", "pw", "abc\x00\x01def")
+	plainFile(t, dir, "readme.md", "plain text")
+	plainFile(t, dir, "shared.age", "age-encryption.org/v1\n")
+	os.Mkdir(filepath.Join(dir, "projects"), 0o700)
+	h := newHarness(t, dir, Options{})
+	h.store.m[account(t, path)] = []byte("pw")
+	h.store.m[account(t, blob)] = []byte("pw")
+
+	h.onlyTerminalColours("the file list")
+
+	h.selectFile("notes.txt")
+	h.waitFor("LOCKED")
+	h.onlyTerminalColours("a locked file")
+
+	h.selectFile("shared.age")
+	h.waitFor("sedit --import")
+	h.onlyTerminalColours("an age file")
+
+	h.selectFile("readme.md")
+	h.waitFor("Not a sedit file")
+	h.onlyTerminalColours("a plain file")
+
+	h.selectFile("projects")
+	h.waitFor("items")
+	h.onlyTerminalColours("a folder")
+
+	h.press('e') // an error message in the status line
+	h.waitFor("select a sedit file first")
+	h.onlyTerminalColours("an error message")
+
+	h.selectFile("notes.txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor(secretText)
+	h.onlyTerminalColours("an unlocked file")
+
+	h.press('?')
+	h.waitFor("Nothing is decrypted")
+	h.onlyTerminalColours("the help box")
+	h.key(tcell.KeyEnter)
+	h.waitGone("Nothing is decrypted")
+
+	h.press('r')
+	h.waitFor("New name or path:")
+	h.onlyTerminalColours("an input box")
+	h.key(tcell.KeyEscape)
+	h.waitGone("New name or path:")
+
+	h.press('d')
+	h.waitFor("Delete notes.txt?")
+	h.onlyTerminalColours("a confirmation")
+	h.key(tcell.KeyEscape)
+	h.waitGone("Delete notes.txt?")
+
+	h.selectFile("blob.bin")
+	h.key(tcell.KeyEnter)
+	h.waitFor("Binary data")
+	h.onlyTerminalColours("binary content")
+}
+
+func TestPasswordDialogUsesOnlyTheTerminalsOwnColours(t *testing.T) {
+	dir := t.TempDir()
+	seditFile(t, dir, "notes.txt", "hunter2", secretText)
+	h := newHarness(t, dir, Options{})
+	h.selectFile("notes.txt")
+	h.key(tcell.KeyEnter)
+	h.waitFor("Password:")
+	h.typeText("abc")
+	h.waitFor("•••")
+	h.onlyTerminalColours("the password dialog")
+	h.key(tcell.KeyEnter)
+	h.waitFor("Wrong password, try again")
+	h.onlyTerminalColours("the password dialog with an error")
+}
+
+// Without colour, what stands out must stand out by attribute.
+func TestSelectionAndBarsAreInReverseVideo(t *testing.T) {
+	dir := t.TempDir()
+	seditFile(t, dir, "notes.txt", "pw", secretText)
+	plainFile(t, dir, "readme.md", "x")
+	h := newHarness(t, dir, Options{})
+	h.selectFile("notes.txt")
+	h.waitFor("LOCKED")
+	h.settle()
+	g := h.grid()
+
+	// The selected row: its text is reversed; an unselected row's is not.
+	reversedAt := func(marker rune) (found, reversed bool) {
+		for _, row := range g {
+			for x, c := range row {
+				if c.r == marker && x < 40 { // in the file list
+					return true, c.attr&tcell.AttrReverse != 0
+				}
+			}
+		}
+		return false, false
+	}
+	if found, rev := reversedAt('▪'); !found || !rev {
+		t.Errorf("the selected file isn't highlighted (found=%v reversed=%v)", found, rev)
+	}
+	if found, rev := reversedAt('·'); !found || rev {
+		t.Errorf("an unselected file is highlighted (found=%v reversed=%v)", found, rev)
+	}
+
+	// The hint bar along the bottom is reversed from edge to edge.
+	last := g[len(g)-1]
+	for x, c := range last {
+		if c.attr&tcell.AttrReverse == 0 {
+			t.Fatalf("the status bar isn't reversed at column %d", x)
+		}
+	}
+
+	// An error is reversed and bold, so it stands out from the plain hints.
+	h.selectFile("readme.md")
+	h.press('e')
+	h.waitFor("select a sedit file first")
+	h.settle()
+	g = h.grid()
+	c := g[len(g)-1][2]
+	if c.attr&tcell.AttrReverse == 0 || c.attr&tcell.AttrBold == 0 {
+		t.Errorf("an error message should be reversed and bold, got attr=%v", c.attr)
+	}
+}

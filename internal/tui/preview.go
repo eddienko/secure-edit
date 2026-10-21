@@ -134,11 +134,15 @@ func (p *preview) Draw(screen tcell.Screen) {
 	}
 
 	if p.text == nil {
-		// tview.Print draws a single line, so draw the message line by line.
-		line, row := "", 0
+		// The first line of text is the headline.
+		line, row, headline := "", 0, true
 		for _, r := range p.message + "\n" {
 			if r == '\n' {
-				tview.Print(screen, line, x+1, y+row, w-2, tview.AlignLeft, tcell.ColorWhite)
+				style := plain
+				if headline && line != "" {
+					style, headline = bold, false
+				}
+				drawText(screen, x+1, y+row, w-2, line, style)
 				line, row = "", row+1
 				if row >= h {
 					break
@@ -154,7 +158,7 @@ func (p *preview) Draw(screen tcell.Screen) {
 	note := ""
 	switch {
 	case looksBinary(text):
-		tview.Print(screen, fmt.Sprintf("Binary data (%d bytes): not shown.", len(text)), x+1, y, w-2, tview.AlignLeft, tcell.ColorYellow)
+		drawText(screen, x+1, y, w-2, fmt.Sprintf("Binary data (%d bytes): not shown.", len(text)), bold)
 		return
 	case len(text) > maxPreview:
 		text, note = text[:maxPreview], fmt.Sprintf("[cut off: showing the first %d of %d bytes]", maxPreview, len(p.text))
@@ -167,14 +171,14 @@ func (p *preview) Draw(screen tcell.Screen) {
 	if p.offset < 0 {
 		p.offset = 0
 	}
-	style := tcell.StyleDefault
+	style := plain
 	layout(text, w, func(row, col int, r rune) {
 		if row >= p.offset && row < p.offset+h {
 			screen.SetContent(x+col, y+row-p.offset, r, nil, style)
 		}
 	})
 	if note != "" {
-		tview.Print(screen, note, x, y+h-1, w, tview.AlignLeft, tcell.ColorYellow)
+		drawText(screen, x, y+h-1, w, note, invert)
 	}
 }
 

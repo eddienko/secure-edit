@@ -32,7 +32,7 @@ func (s *secretBox) Draw(screen tcell.Screen) {
 	if w < 4 || h < 3 {
 		return
 	}
-	tview.Print(screen, s.label, x+1, y, w-2, tview.AlignLeft, tcell.ColorWhite)
+	drawText(screen, x+1, y, w-2, s.label, plain)
 
 	// The field: one dot per character typed, never the characters.
 	n := utf8.RuneCount(s.value)
@@ -43,13 +43,13 @@ func (s *secretBox) Draw(screen tcell.Screen) {
 	for i := 0; i < n; i++ {
 		field += "•"
 	}
-	tview.Print(screen, field, x+1, y+1, w-2, tview.AlignLeft, tcell.ColorYellow)
-	screen.SetContent(x+1+2+n, y+1, '█', nil, tcell.StyleDefault.Foreground(tcell.ColorYellow))
+	drawText(screen, x+1, y+1, w-2, field, bold)
+	screen.SetContent(x+1+2+n, y+1, ' ', nil, invert) // the cursor: a reversed cell
 
 	if s.err != "" {
-		tview.Print(screen, s.err, x+1, y+2, w-2, tview.AlignLeft, tcell.ColorRed)
+		drawText(screen, x+1, y+2, w-2, s.err, alert)
 	} else if h >= 4 {
-		tview.Print(screen, "Enter to confirm, Esc to cancel", x+1, y+3, w-2, tview.AlignLeft, tcell.ColorGray)
+		drawText(screen, x+1, y+3, w-2, "Enter to confirm, Esc to cancel", plain)
 	}
 }
 

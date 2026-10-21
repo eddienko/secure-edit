@@ -248,6 +248,12 @@ press** (change that with `--idle`, for example `--idle 30s`). Locking zeroes th
 decrypted text and the password in memory. While you are in the editor the timer
 doesn't run.
 
+**Colors.** `sedit-tui` uses no colors of its own: everything is drawn in your
+terminal's default foreground and background, and emphasis comes from bold and
+reverse video (the selected file and the bar at the bottom are reversed) and from
+symbols (`▪ ○ ·`). So it follows your theme, whether light, dark or see-through,
+and nothing can end up unreadable because a color blends into your background.
+
 **What it does not do (yet).** Sharing, importing, key generation and encrypting a
 plain file are only in `sedit`. There is no search inside files, and no mouse.
 Files larger than 1 MiB are shown cut off, and binary content is not displayed.
