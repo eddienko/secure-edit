@@ -600,6 +600,10 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 	if a.filterEditing {
 		return a.filterKey(ev)
 	}
+	if ev.Key() == tcell.KeyF1 {
+		a.help()
+		return nil
+	}
 	if a.app.GetFocus() == a.prev {
 		if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyTab {
 			a.app.SetFocus(a.tree)
@@ -860,6 +864,7 @@ func (a *App) help() {
 		"J K      scroll the text a line     PgUp PgDn  a page     Space  a page down",
 		"Tab      move into the text to scroll it (Esc or Tab comes back)",
 		"q        quit",
+		"? F1     this list",
 		"",
 		"A file locks again when you move to another one, or after",
 		fmt.Sprintf("%s without a key press.", words(a.opts.Idle)),
@@ -867,7 +872,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 78, 28)
+	}, "\n"), 78, 31)
 }
 
 // ---- actions ------------------------------------------------------------

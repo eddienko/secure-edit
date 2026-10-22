@@ -1308,3 +1308,13 @@ func TestThePreviewNeverSaysLockedForAnUnlockedFile(t *testing.T) {
 		h.settle()
 	}
 }
+
+func TestF1OpensTheHelpLikeQuestionMark(t *testing.T) {
+	h := newHarness(t, t.TempDir(), Options{})
+	for _, press := range []func(){func() { h.press('?') }, func() { h.key(tcell.KeyF1) }} {
+		press()
+		h.waitFor("unlock and show the file")
+		h.key(tcell.KeyEscape)
+		h.waitGone("unlock and show the file")
+	}
+}

@@ -69,7 +69,7 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `J` `K` | Scroll the text a line down or up, without leaving the list. |
 | `PgDn` `PgUp` `Space` | Scroll the text a page, from the list, while a file's text is shown (on a locked file or a folder they page the list as usual). `Space` goes down. |
 | `Tab` | Move into the text to scroll it with the arrow keys (`Esc` or `Tab` returns to the list). `y` works there too. |
-| `?`, `q` | Help, quit. |
+| `?` or `F1`, `q` | Help, quit. |
 
 **The built-in editor.** `e` runs your own editor; `E` edits the text in the right pane
 instead, with the keys below. It suits quick changes to a note or a credentials
