@@ -11,6 +11,13 @@ sedit --idle 5m ~/secrets
 sedit --clipboard-timeout 10s ~/secrets
 ```
 
+When you quit, the interface remembers which folders were open, which entry was
+selected and whether the two-line list (`v`) was on, for each top folder, and
+restores them the next time. They are kept in `state.json` in the `sedit` folder
+of your user config directory (on macOS `~/Library/Application Support/sedit`).
+It holds folder and file names only, never anything from inside a file; delete it
+to start fresh.
+
 To always open the same place, put `export SEDIT_HOME=~/secrets` in your shell
 profile. A folder given on the command line wins over it. The interface needs a
 terminal: `sedit` with no arguments in a script or a pipe says so.

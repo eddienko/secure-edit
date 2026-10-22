@@ -120,9 +120,19 @@ func runUI(o *uiOptions) error {
 	if err != nil {
 		return err
 	}
-	app, err := tui.New(dir, tui.Options{Idle: o.idle, ClipboardTTL: o.clip})
+	app, err := tui.New(dir, tui.Options{Idle: o.idle, ClipboardTTL: o.clip, StateFile: stateFile()})
 	if err != nil {
 		return err
 	}
 	return app.Run()
+}
+
+// stateFile is where the interface remembers its view, or "" if the user has
+// no config folder.
+func stateFile() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "sedit", "state.json")
 }

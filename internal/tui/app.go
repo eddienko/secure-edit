@@ -36,6 +36,8 @@ type Options struct {
 	PasswordCheckDelay time.Duration    // how long the cursor rests on a file before the Keychain is asked about it; 150ms if zero
 	Now                func() time.Time // for tests: the clock; time.Now if nil
 
+	StateFile string // where the open folders, selection and layout are remembered between runs; nothing is if empty
+
 	TwoLine bool // list a file that has a title on two lines: the title, then its name
 
 	ClipboardTTL time.Duration  // how long copied text stays on the clipboard; DefaultClipboardTTL if zero
@@ -122,6 +124,7 @@ func New(root string, opts Options) (*App, error) {
 
 	a.pwState = map[string]pwState{}
 	a.twoLine = opts.TwoLine
+	selected := a.restoreView()
 	a.tree = tview.NewTreeView().SetGraphics(!a.twoLine).SetAlign(a.twoLine)
 	a.tree.SetBorder(true).SetTitle(" " + treeTitle(root) + " ")
 	a.tree.SetChangedFunc(a.onChanged)
@@ -136,7 +139,7 @@ func New(root string, opts Options) (*App, error) {
 		AddItem(a.status, 1, 0, false)
 	a.pages.AddPage("main", main, true, true)
 
-	a.reload("")
+	a.reload(selected)
 	a.app.SetRoot(a.pages, true).SetFocus(a.tree)
 	a.app.EnablePaste(true)
 	a.app.SetInputCapture(a.capture)
@@ -164,6 +167,7 @@ func (a *App) Run() error {
 	}()
 	err := a.app.Run()
 	a.stopped.Store(true)
+	a.saveView()
 	a.lock() // never leave secrets behind
 	a.endChecks()
 	a.releaseClipboard()

@@ -7,6 +7,10 @@ What `sedit` protects, what it does not, and how the files are laid out.
 Read these before relying on `sedit`. It protects data **at rest**. It does not
 defend against malware or an attacker on your machine while the file is open.
 
+- **Remembered view.** The interface saves the names of the open folders and of
+  the selected entry in `state.json` in your user config directory (mode `0600`),
+  so it can reopen as you left it. File names are visible in the folder anyway,
+  but this copy lives elsewhere; delete the file if that matters to you.
 - **Plaintext temp file.** While you edit, the plaintext sits in a `0700` temp
   directory. It is zeroed and deleted afterwards, but on macOS the temp
   directory is on disk, not RAM, so the data may have reached the SSD. Zeroing
