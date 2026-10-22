@@ -242,7 +242,7 @@ func TestANewFileThatDoesNotMatchClearsTheFilter(t *testing.T) {
 	h.typeText("pw")
 	h.key(tcell.KeyEnter)
 	h.waitFor("saved zzz.txt")
-	h.waitFor("▪ zzz.txt") // visible: the filter was dropped rather than hide it,
+	h.waitFor("▫ zzz.txt") // visible: the filter was dropped rather than hide it,
 	h.waitFor("personal/") // and the folder it is in is open
 	h.waitFor("notes.txt")
 	h.waitGone("· /diary")

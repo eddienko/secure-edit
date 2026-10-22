@@ -27,7 +27,8 @@ terminal: `sedit` with no arguments in a script or a pipe says so.
  ↑↓ move  ⏎ unlock  e edit  n new  r rename  d delete  p password  l lock  ? help  q quit
 ```
 
-The list shows folders, then files. `▪` is a `sedit` file, `○` an age file (turn
+The list shows folders, then files. `▪` is a `sedit` file (`▫`, hollow, while it is
+unlocked), `○` an age file (turn
 it into a `sedit` file with `sedit --import`) and `·` anything else. Backups
 (`.bak`), lock files and dot files are hidden.
 
@@ -179,7 +180,7 @@ whole decrypted text instead (or `e` to open it in your editor).
 **Colors.** The interface uses no colors of its own: everything is drawn in your
 terminal's default foreground and background, and emphasis comes from bold and
 reverse video (the selected file and the bar at the bottom are reversed) and from
-symbols (`▪ ○ ·`). So it follows your theme, whether light, dark or see-through,
+symbols (`▪ ▫ ○ ·`). So it follows your theme, whether light, dark or see-through,
 and nothing can end up unreadable because a color blends into your background.
 
 **What it does not do (yet).** Sharing, importing, key generation and encrypting a

@@ -83,7 +83,7 @@ versions 1 and 2 still opening unchanged.
   age file, share, restore the previous version from `.bak`, duplicate a file.
 - **Narrow terminals:** under about 60 columns show one pane at a time.
 - **Remember** the last folder and which folders were open.
-- **An `--ascii` mode** for fonts where `▪ ○ ·` render badly, and an opt-in mouse
+- **An `--ascii` mode** for fonts where `▪ ▫ ○ ·` render badly, and an opt-in mouse
   (it switches off the terminal's own text selection).
 - **A folder password or session password** that is asked once for a whole folder was
   considered and set aside: with passwords in the Keychain the folder is only as

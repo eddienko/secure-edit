@@ -80,6 +80,7 @@ type App struct {
 	busy         bool                         // a folder is being moved in the background: keys are ignored
 	quiet        bool                         // a file is open in memory but the preview still shows it locked (see unlockFor)
 	holder       *clip.Holder                 // copies to the clipboard and clears it again; made on first use
+	marked       string                       // the file whose mark in the list says it is unlocked
 	stopped      atomic.Bool                  // set when the interface has closed
 }
 
@@ -139,6 +140,7 @@ func New(root string, opts Options) (*App, error) {
 	a.app.SetRoot(a.pages, true).SetFocus(a.tree)
 	a.app.EnablePaste(true)
 	a.app.SetInputCapture(a.capture)
+	a.app.SetBeforeDrawFunc(func(tcell.Screen) bool { a.refreshMarks(); return false })
 	a.status.hints = a.hintsFor
 	a.renderStatus()
 	return a, nil
@@ -198,14 +200,74 @@ func (a *App) label(e Entry) (string, tcell.Style) {
 		}
 		return name + "/", bold
 	case KindSedit:
-		if title != "" {
-			return "▪ " + title, plain
+		mark := lockedMark
+		if a.isOpen(e.Path) {
+			mark = openMark
 		}
-		return "▪ " + name, plain
+		if title != "" {
+			return mark + title, plain
+		}
+		return mark + name, plain
 	case KindAge:
 		return "○ " + name, plain
 	}
 	return "· " + name, plain
+}
+
+// The mark in front of a sedit file: filled while it is locked, hollow while it
+// is unlocked (open in memory).
+const (
+	lockedMark = "▪ "
+	openMark   = "▫ "
+)
+
+// isOpen reports whether the file at path is the one that is unlocked, as the
+// preview's title says it is.
+func (a *App) isOpen(path string) bool {
+	return a.session != nil && !a.session.Locked() && !a.quiet && a.session.Path == path
+}
+
+// openPath is the path of the unlocked file, or "".
+func (a *App) openPath() string {
+	if a.session != nil && a.isOpen(a.session.Path) {
+		return a.session.Path
+	}
+	return ""
+}
+
+// refreshMarks changes the marks in the list when a file has been unlocked or
+// locked since they were drawn. It is called before each draw, and does nothing
+// unless the unlocked file changed.
+func (a *App) refreshMarks() {
+	now := a.openPath()
+	if now == a.marked || a.tree == nil || a.tree.GetRoot() == nil {
+		return
+	}
+	old := a.marked
+	a.marked = now
+	a.tree.GetRoot().Walk(func(n, _ *tview.TreeNode) bool {
+		e, ok := n.GetReference().(*Entry)
+		if !ok || e.Kind != KindSedit || (e.Path != old && e.Path != now) {
+			return true
+		}
+		mark, other := lockedMark, openMark
+		if e.Path == now {
+			mark, other = openMark, lockedMark
+		}
+		if r := a.rows[n]; r != nil { // the two-line list keeps its text in two states
+			r.normal = strings.Replace(r.normal, other, mark, 1)
+			r.selected = strings.Replace(r.selected, other, mark, 1)
+			if n == a.tree.GetCurrentNode() {
+				n.SetText(r.selected)
+			} else {
+				n.SetText(r.normal)
+			}
+			return true
+		}
+		text, _ := a.label(*e)
+		n.SetText(text)
+		return true
+	})
 }
 
 func (a *App) newNode(e Entry) *tview.TreeNode {
@@ -878,7 +940,7 @@ func (a *App) help() {
 		"A file locks again when you move to another one, or after",
 		fmt.Sprintf("%s without a key press.", words(a.opts.Idle)),
 		"",
-		"▪ sedit file    ○ age file    · other file",
+		"▪ sedit file    ▫ one that is unlocked    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
 	}, "\n"))

@@ -442,7 +442,7 @@ func TestNewFile(t *testing.T) {
 	h.key(tcell.KeyEnter)
 
 	h.waitFor("saved fresh.txt")
-	h.waitFor("▪ fresh.txt")
+	h.waitFor("▫ fresh.txt")
 	h.waitFor("brand new text")
 	if got := decrypt(t, filepath.Join(dir, "fresh.txt"), "s3cret"); got != "brand new text\n" {
 		t.Errorf("file holds %q", got)
@@ -1316,5 +1316,35 @@ func TestF1OpensTheHelpLikeQuestionMark(t *testing.T) {
 		h.waitFor("unlock and show the file")
 		h.key(tcell.KeyEscape)
 		h.waitGone("unlock and show the file")
+	}
+}
+
+func TestTheUnlockedFileHasAHollowMarkInTheList(t *testing.T) {
+	for _, twoLine := range []bool{false, true} {
+		dir := t.TempDir()
+		a := seditFile(t, dir, "alpha.txt", "pw", "first")
+		b := seditFile(t, dir, "beta.txt", "pw", "second")
+		h := newHarness(t, dir, Options{TwoLine: twoLine})
+		h.store.put(account(t, a), "pw")
+		h.store.put(account(t, b), "pw")
+		h.waitFor("▪ alpha.txt")
+		h.waitFor("▪ beta.txt")
+
+		h.selectFile("alpha.txt")
+		h.key(tcell.KeyEnter)
+		h.waitFor("first")
+		h.waitFor("▫ alpha.txt")
+		h.waitFor("▪ beta.txt") // the others keep the filled mark
+
+		h.press('l')
+		h.waitFor("▪ alpha.txt")
+		h.notOnScreen("▫")
+
+		// Unlocking another file moves the mark.
+		h.selectFile("beta.txt")
+		h.key(tcell.KeyEnter)
+		h.waitFor("second")
+		h.waitFor("▫ beta.txt")
+		h.waitFor("▪ alpha.txt")
 	}
 }

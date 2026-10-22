@@ -185,7 +185,7 @@ func TestNewFileAsksForATitleAndDescription(t *testing.T) {
 	if got := decrypt(t, path, "s3cret"); got != "brand new text\n" {
 		t.Errorf("text %q", got)
 	}
-	h.waitFor("▪ Work VPN")
+	h.waitFor("▫ Work VPN")
 	if strings.Contains(string(readFile(t, path)), "brand new text") {
 		t.Error("plaintext in the file")
 	}
@@ -210,7 +210,7 @@ func TestNewFileLabelsAreOptional(t *testing.T) {
 	if data[6] != 1 {
 		t.Errorf("file version %d: with no labels it must stay version 1", data[6])
 	}
-	h.waitFor("▪ plain.txt")
+	h.waitFor("▫ plain.txt")
 }
 
 func TestEscapeInTheNewFileBoxCancelsIt(t *testing.T) {
