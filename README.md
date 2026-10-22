@@ -144,6 +144,20 @@ go build -o sedit ./cmd/sedit
 - [Roadmap](docs/roadmap.md): ideas for later, such as a recovery key for a forgotten
   password.
 
+## More screenshots
+
+The list of keys in the interface (`?` or `F1`):
+
+<p align="center">
+  <img src="sedit1.png" alt="The sedit key list, open over the interface" width="800">
+</p>
+
+Editing in the built-in editor (`E`), with its own key list (`F1`):
+
+<p align="center">
+  <img src="sedit2.png" alt="The built-in editor with its list of keys" width="800">
+</p>
+
 ## License
 
 [MIT](LICENSE) © 2026 Eduardo Gonzalez Solares
