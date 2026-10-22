@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -220,4 +221,222 @@ func TestBuiltinEditorLineNumbers(t *testing.T) {
 	h.waitFor("line numbers off")
 	h.notOnScreen("1 alpha")
 	h.waitFor("alpha")
+}
+
+// brokenClip is a clipboard that can't be used, as on a machine with no tool.
+type brokenClip struct{}
+
+func (brokenClip) Set([]byte) error     { return errors.New("no clipboard tool") }
+func (brokenClip) Get() ([]byte, error) { return nil, errors.New("no clipboard tool") }
+func (brokenClip) Clear() error         { return nil }
+
+func openForClipboard(t *testing.T, opts Options, text string) (*harness, string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := seditFile(t, dir, "notes.txt", "pw", text)
+	h := newHarness(t, dir, opts)
+	h.remember(path)
+	h.selectFile("notes.txt")
+	h.press('E')
+	h.waitFor("(editing)")
+	h.key(tcell.KeyHome)
+	return h, path
+}
+
+func (h *harness) shiftRight(n int) {
+	for i := 0; i < n; i++ {
+		h.sim.InjectKey(tcell.KeyRight, 0, tcell.ModShift)
+	}
+}
+
+func TestBuiltinEditorCopiesAndPastesThroughTheSystemClipboard(t *testing.T) {
+	clipb := &fakeClip{}
+	h, path := openForClipboard(t, Options{Clipboard: clipb, ClipboardTTL: time.Hour}, "hello world")
+	h.shiftRight(5) // select "hello"
+	h.key(tcell.KeyCtrlQ)
+	h.waitFor("copied to the clipboard")
+	if got := clipb.text(); got != "hello" {
+		t.Fatalf("clipboard = %q", got)
+	}
+	h.key(tcell.KeyEnd)
+	h.key(tcell.KeyCtrlV)
+	h.key(tcell.KeyCtrlS)
+	h.waitFor("saved notes.txt")
+	if got := plainOf(t, path); got != "hello worldhello" {
+		t.Errorf("saved %q", got)
+	}
+
+	// Text from outside is pasted too, and a cut leaves the clipboard holding it.
+	clipb.Set([]byte("OUT"))
+	h.key(tcell.KeyHome)
+	h.key(tcell.KeyCtrlV)
+	h.shiftRight(3)
+	h.key(tcell.KeyCtrlX)
+	h.waitFor("copied to the clipboard")
+	if got := clipb.text(); got != "hel" {
+		t.Errorf("after the cut the clipboard = %q", got)
+	}
+	h.key(tcell.KeyCtrlS)
+	h.waitFor("saved notes.txt")
+	if got := plainOf(t, path); got != "OUTlo worldhello" {
+		t.Errorf("saved %q", got)
+	}
+}
+
+func TestBuiltinEditorCopyWithNothingSelectedDoesNothing(t *testing.T) {
+	clipb := &fakeClip{}
+	clipb.Set([]byte("keep me"))
+	h, _ := openForClipboard(t, Options{Clipboard: clipb, ClipboardTTL: time.Hour}, "hello")
+	h.key(tcell.KeyCtrlQ)
+	h.typeText("x")
+	h.waitFor("(editing, not saved)")
+	if got := clipb.text(); got != "keep me" {
+		t.Errorf("clipboard = %q", got)
+	}
+}
+
+func TestBuiltinEditorFallsBackToItsOwnClipboard(t *testing.T) {
+	h, path := openForClipboard(t, Options{Clipboard: brokenClip{}}, "abc")
+	h.shiftRight(2)
+	h.key(tcell.KeyCtrlQ)
+	h.waitFor("copied inside the editor only")
+	h.key(tcell.KeyEnd)
+	h.key(tcell.KeyCtrlV)
+	h.key(tcell.KeyCtrlS)
+	h.waitFor("saved notes.txt")
+	if got := plainOf(t, path); got != "abcab" {
+		t.Errorf("saved %q", got)
+	}
+}
+
+func TestShiftHomeAndEndExtendTheSelection(t *testing.T) {
+	clipb := &fakeClip{}
+	h, _ := openForClipboard(t, Options{Clipboard: clipb, ClipboardTTL: time.Hour}, "hello world")
+	h.sim.InjectKey(tcell.KeyEnd, 0, tcell.ModShift)
+	h.key(tcell.KeyCtrlQ)
+	h.waitFor("copied to the clipboard")
+	if got := clipb.text(); got != "hello world" {
+		t.Errorf("clipboard = %q", got)
+	}
+}
+
+// reversedText is the text on the screen that is drawn in reverse video, row by row.
+func (h *harness) reversedText() string {
+	var out strings.Builder
+	for _, row := range h.grid() {
+		for _, c := range row {
+			if c.attr&tcell.AttrReverse != 0 {
+				out.WriteRune(c.r)
+			}
+		}
+	}
+	return out.String()
+}
+
+func TestSelectedTextShowsInReverse(t *testing.T) {
+	h, _ := openForClipboard(t, Options{Clipboard: &fakeClip{}, ClipboardTTL: time.Hour}, "hello world")
+	h.shiftRight(5)
+	h.settle()
+	// The bar at the bottom is reversed too, so look for the word among it.
+	if got := h.reversedText(); !strings.Contains(got, "hello") || strings.Contains(got, "world") {
+		t.Errorf("the selection should show in reverse: %q", got)
+	}
+	h.key(tcell.KeyRight) // the selection ends
+	h.settle()
+	if got := h.reversedText(); strings.Contains(got, "hello") {
+		t.Errorf("no selection, but %q is still in reverse", got)
+	}
+}
+
+func TestSelectionAcrossLinesCopiesAll(t *testing.T) {
+	clipb := &fakeClip{}
+	h, _ := openForClipboard(t, Options{Clipboard: clipb, ClipboardTTL: time.Hour}, "one\ntwo\nthree\nfour")
+	h.sim.InjectKey(tcell.KeyDown, 0, tcell.ModShift)
+	h.sim.InjectKey(tcell.KeyDown, 0, tcell.ModShift)
+	h.sim.InjectKey(tcell.KeyRight, 0, tcell.ModShift)
+	h.settle()
+	t.Logf("reversed: %q", h.reversedText())
+	h.key(tcell.KeyCtrlQ)
+	h.waitFor("copied to the clipboard")
+	if got := clipb.text(); got != "one\ntwo\nt" {
+		t.Errorf("clipboard = %q", got)
+	}
+}
+
+func TestMarkingSelectsWithThePlainArrows(t *testing.T) {
+	clipb := &fakeClip{}
+	h, _ := openForClipboard(t, Options{Clipboard: clipb, ClipboardTTL: time.Hour}, "one\ntwo\nthree\nfour")
+	h.key(tcell.KeyCtrlB)
+	h.waitFor("(selecting)")
+	h.waitFor("the arrow keys select now")
+	h.key(tcell.KeyDown)
+	h.key(tcell.KeyDown)
+	h.key(tcell.KeyRight)
+	h.settle()
+	if got := h.reversedText(); !strings.Contains(got, "one") || !strings.Contains(got, "two") {
+		t.Errorf("the lines should show selected: %q", got)
+	}
+	h.key(tcell.KeyCtrlQ)
+	h.waitFor("copied to the clipboard")
+	h.waitFor("(editing)") // copying ends the selecting
+	if got := clipb.text(); got != "one\ntwo\nt" {
+		t.Errorf("clipboard = %q", got)
+	}
+}
+
+func TestMarkingEscapeCancelsAndCutDeletes(t *testing.T) {
+	clipb := &fakeClip{}
+	h, path := openForClipboard(t, Options{Clipboard: clipb, ClipboardTTL: time.Hour}, "one\ntwo\nthree")
+	h.key(tcell.KeyCtrlB)
+	h.key(tcell.KeyDown)
+	h.key(tcell.KeyEscape) // cancels, and the editor stays open
+	h.waitFor("(editing)")
+	h.settle()
+	if got := h.reversedText(); strings.Contains(got, "one") {
+		t.Errorf("the selection should be gone: %q", got)
+	}
+	h.key(tcell.KeyUp) // the cursor was left where the selection ended
+	h.key(tcell.KeyHome)
+	h.key(tcell.KeyCtrlB)
+	h.key(tcell.KeyDown)
+	h.key(tcell.KeyCtrlX)
+	h.waitFor("(editing, not saved)")
+	h.key(tcell.KeyCtrlS)
+	h.waitFor("saved notes.txt")
+	if got := plainOf(t, path); got != "two\nthree" {
+		t.Errorf("saved %q", got)
+	}
+	if got := clipb.text(); got != "one\n" {
+		t.Errorf("clipboard = %q", got)
+	}
+}
+
+func TestEditorBarDoesNotOfferHelpOrQuit(t *testing.T) {
+	h, _ := openBuiltin(t, Options{})
+	h.waitFor("^S save")
+	h.notOnScreen("? help")
+	h.notOnScreen("q quit")
+	h.typeText("q?")
+	h.waitFor("(editing, not saved)") // they were typed into the text
+	h.key(tcell.KeyCtrlB)
+	h.waitFor("the arrow keys select now")
+	h.key(tcell.KeyEscape)
+	h.notOnScreen("q quit")
+	h.key(tcell.KeyCtrlS)
+	h.waitFor("saved notes.txt")
+	h.key(tcell.KeyEscape)
+	h.waitFor("? help  q quit") // back in the list
+}
+
+func TestF1ListsTheEditorKeysAndReturnsToTheText(t *testing.T) {
+	h, _ := openBuiltin(t, Options{})
+	h.waitFor("F1 keys")
+	h.key(tcell.KeyF1)
+	h.waitFor("Editor keys")
+	h.waitFor("Ctrl-B    select with the arrow keys")
+	h.key(tcell.KeyEscape)
+	h.waitGone("Editor keys")
+	h.typeText("Z") // the keys go to the text again
+	h.waitFor("(editing, not saved)")
+	h.waitFor("Zfirst line")
 }

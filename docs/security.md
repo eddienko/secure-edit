@@ -23,12 +23,12 @@ defend against malware or an attacker on your machine while the file is open.
   files to leak. But the text area keeps its own copies of the text, including its
   undo history, and they can't be zeroed. Closing the editor empties the area and
   `sedit` zeroes the text it holds, but the old bytes may stay in freed memory
-  until something reuses it. The same goes for text copied or cut inside the
-  editor (`Ctrl-Q`, `Ctrl-X`), which goes to the editor's own clipboard and not
-  the system one. Anyone who can read this process's memory could find them,
+  until something reuses it. Anyone who can read this process's memory could find them,
   which is the exposure any editor has inside its own process. Quitting `sedit`
-  ends it. Use `e` with a protected vim if you want the text to stay out of this
-  process.
+  ends it. Text copied or cut in the editor (`Ctrl-Q`, `Ctrl-X`) goes to the
+  system clipboard, with the risks of `y`: see **Clipboard** in
+  [the interface notes](interface.md). Use `e` with a protected vim if you want
+  the text to stay out of this process.
 - **Memory is not locked or reliably wiped.** Go's garbage collector can leave
   copies of the password and plaintext in memory, and memory may be swapped.
 - **Your passphrase is the weak point.** Argon2id slows brute force, but a weak

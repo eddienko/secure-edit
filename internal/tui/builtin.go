@@ -9,6 +9,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
+	"github.com/eddienko/secure-edit/internal/vault"
 )
 
 // maxBuiltinEdit is the largest text the built-in editor opens; the text area
@@ -20,10 +22,12 @@ const maxBuiltinEdit = 256 << 10
 // text, including its undo history, which can't be zeroed: closing the editor
 // empties it, but see docs/security.md.
 type builtinEditor struct {
-	area  *numbered
-	s     *Session
-	dirty bool
-	query string // what Ctrl-F last looked for
+	area    *numbered
+	s       *Session
+	dirty   bool
+	query   string // what Ctrl-F last looked for
+	marking bool   // Ctrl-B: the arrow keys select, for terminals that keep Shift with the arrows for themselves
+	local   string // what was copied in the editor when there is no system clipboard
 }
 
 // editBuiltin opens the selected file in the built-in editor, unlocking it first.
@@ -45,8 +49,10 @@ func (a *App) editBuiltin() {
 func (a *App) startBuiltin(s *Session) {
 	ta := &numbered{TextArea: tview.NewTextArea()}
 	ta.SetText(string(s.Plain), false)
+	ta.SetSelectedStyle(invert) // the text area's own is the terminal's colours swapped, which is no change at all
 	ta.SetBorder(true)
 	a.ed = &builtinEditor{area: ta, s: s}
+	ta.SetClipboard(a.editCopy, a.editPaste)
 	ta.SetChangedFunc(func() {
 		a.ed.dirty = true
 		a.editTitle()
@@ -64,7 +70,12 @@ func (a *App) editTitle() {
 		return
 	}
 	state := "(editing)"
-	if e.dirty {
+	switch {
+	case e.marking && e.dirty:
+		state = "(selecting, not saved)"
+	case e.marking:
+		state = "(selecting)"
+	case e.dirty:
 		state = "(editing, not saved)"
 	}
 	e.area.SetTitle(a.paneTitle(e.s.Meta().Title, filepath.Base(e.s.Path), state))
@@ -73,9 +84,40 @@ func (a *App) editTitle() {
 // editKey handles a key while the built-in editor is open; keys it doesn't use
 // go on to the text area.
 func (a *App) editKey(ev *tcell.EventKey) *tcell.EventKey {
+	if e := a.ed; e.marking {
+		switch ev.Key() {
+		case tcell.KeyUp, tcell.KeyDown, tcell.KeyLeft, tcell.KeyRight, tcell.KeyHome, tcell.KeyEnd, tcell.KeyPgUp, tcell.KeyPgDn:
+			// Moving while marking is what Shift does, so say that to the text area.
+			return tcell.NewEventKey(ev.Key(), ev.Rune(), ev.Modifiers()|tcell.ModShift)
+		case tcell.KeyCtrlA, tcell.KeyCtrlE:
+			key := tcell.KeyHome
+			if ev.Key() == tcell.KeyCtrlE {
+				key = tcell.KeyEnd
+			}
+			return tcell.NewEventKey(key, 0, tcell.ModShift)
+		case tcell.KeyEscape:
+			a.endMark(true)
+			return nil
+		case tcell.KeyCtrlQ, tcell.KeyCtrlX:
+			defer a.endMark(false) // after the text area has copied
+			return ev
+		}
+	}
 	switch ev.Key() {
+	case tcell.KeyCtrlB:
+		a.ed.marking = !a.ed.marking
+		if !a.ed.marking {
+			a.endMark(true)
+		} else {
+			a.editTitle()
+			a.say("selecting: the arrow keys select now; Ctrl-Q copies, Ctrl-X cuts, Esc cancels", false)
+		}
+		return nil
 	case tcell.KeyCtrlS:
 		a.saveBuiltin()
+		return nil
+	case tcell.KeyF1:
+		a.editHelp()
 		return nil
 	case tcell.KeyCtrlT:
 		on := a.ed.area.toggle()
@@ -91,6 +133,9 @@ func (a *App) editKey(ev *tcell.EventKey) *tcell.EventKey {
 		a.gotoDialog()
 		return nil
 	case tcell.KeyCtrlA, tcell.KeyCtrlE, tcell.KeyHome, tcell.KeyEnd:
+		if ev.Modifiers()&tcell.ModShift != 0 {
+			return ev // selecting: the text area extends the selection to the edge of the row
+		}
 		lineEdge(a.ed.area.TextArea, ev.Key() == tcell.KeyCtrlA || ev.Key() == tcell.KeyHome)
 		return nil
 	case tcell.KeyEscape:
@@ -137,6 +182,7 @@ func (a *App) endBuiltin() {
 		return
 	}
 	a.ed = nil
+	e.local = ""
 	e.area.SetChangedFunc(nil)
 	e.area.SetText("", true)
 	a.body.RemoveItem(e.area)
@@ -290,4 +336,73 @@ func (n *numbered) Draw(screen tcell.Screen) {
 			screen.SetContent(x+1+i, y+1+row, r, nil, style)
 		}
 	}
+}
+
+// editCopy is where Ctrl-Q and Ctrl-X put the selected text: on the system
+// clipboard, cleared again after the usual time, or, if there is no tool for
+// that, in the editor's own.
+func (a *App) editCopy(text string) {
+	e := a.ed
+	h, err := a.clipHolder()
+	if err == nil {
+		err = h.Copy([]byte(text), a.opts.ClipboardTTL, a.afterClear)
+	}
+	if err != nil {
+		e.local = text
+		a.say("copied inside the editor only: "+err.Error(), true)
+		return
+	}
+	e.local = ""
+	a.say(fmt.Sprintf("copied to the clipboard; it is cleared in %s", a.opts.ClipboardTTL), false)
+}
+
+// editPaste is where Ctrl-V gets its text: the system clipboard, or what was
+// copied inside the editor if that can't be read.
+func (a *App) editPaste() string {
+	c, err := a.clipboard()
+	if err == nil {
+		var data []byte
+		if data, err = c.Get(); err == nil {
+			s := string(data)
+			vault.Wipe(data)
+			return s
+		}
+	}
+	if a.ed.local == "" {
+		a.say("couldn't read the clipboard: "+err.Error(), true)
+	}
+	return a.ed.local
+}
+
+// endMark stops selecting; with drop set it also drops what is selected.
+func (a *App) endMark(drop bool) {
+	e := a.ed
+	e.marking = false
+	if drop {
+		_, _, to := e.area.GetSelection()
+		e.area.Select(to, to)
+	}
+	a.editTitle()
+}
+
+// editHelp lists the editor's keys.
+func (a *App) editHelp() {
+	a.textDialog("edithelp", "Editor keys", strings.Join([]string{
+		"Ctrl-S    save (the previous version is kept as .bak)",
+		"Esc       close; asks first if there are unsaved changes",
+		"",
+		"Ctrl-F    find text (any case)       F3     next match",
+		"Ctrl-G    go to a line number        Ctrl-T line numbers on and off",
+		"",
+		"Ctrl-B    select with the arrow keys (Esc cancels); or Shift + arrows",
+		"Ctrl-L    select everything",
+		"Ctrl-Q    copy      Ctrl-X  cut      Ctrl-V  paste (the system clipboard)",
+		"Ctrl-Z    undo      Ctrl-Y  redo",
+		"",
+		"Ctrl-A    start of the line          Ctrl-E end of the line",
+		"Home End  the same                   Ctrl-K delete to the end of the line",
+		"Ctrl-U    delete the line            Ctrl-W delete the word before",
+		"",
+		"Enter, Esc or q closes this box.",
+	}, "\n"), 74, 19)
 }

@@ -137,6 +137,7 @@ func New(root string, opts Options) (*App, error) {
 
 	a.reload("")
 	a.app.SetRoot(a.pages, true).SetFocus(a.tree)
+	a.app.EnablePaste(true)
 	a.app.SetInputCapture(a.capture)
 	a.status.hints = a.hintsFor
 	a.renderStatus()
@@ -464,8 +465,11 @@ const helpTail = "? help  q quit"
 
 // hintItems are the keys that matter right now, most useful first.
 func (a *App) hintItems() []string {
+	if a.ed != nil && a.ed.marking {
+		return []string{"arrows select", "^Q copy", "^X cut", "Esc cancel"}
+	}
 	if a.ed != nil {
-		return []string{"^S save", "^F find", "F3 next", "^G line", "^T numbers", "Esc close"}
+		return []string{"^S save", "F1 keys", "^F find", "F3 next", "^G line", "^B select", "^T numbers", "Esc close"}
 	}
 	if a.prev.HasFocus() {
 		return []string{"↑↓ scroll", "PgUp/PgDn page", "y copy", "Esc back"}
@@ -508,8 +512,12 @@ func (a *App) hintsFor(width int) string {
 	if a.filterEditing {
 		return a.filterLine()
 	}
-	text := helpTail
-	room := width - runewidth.StringWidth(helpTail) - 2
+	tail := helpTail
+	if a.ed != nil {
+		tail = "" // in the editor ? and q are letters to type, not keys
+	}
+	text := tail
+	room := width - runewidth.StringWidth(tail) - 2
 	var items []string
 	for _, it := range a.hintItems() {
 		room -= runewidth.StringWidth(it) + 2
@@ -519,7 +527,7 @@ func (a *App) hintsFor(width int) string {
 		items = append(items, it)
 	}
 	if len(items) > 0 {
-		text = strings.Join(items, "  ") + "  " + text
+		text = strings.TrimRight(strings.Join(items, "  ")+"  "+text, " ")
 	}
 	return text
 }
@@ -591,6 +599,10 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 	}
 	if a.filterEditing {
 		return a.filterKey(ev)
+	}
+	if ev.Key() == tcell.KeyF1 {
+		a.help()
+		return nil
 	}
 	if a.app.GetFocus() == a.prev {
 		if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyTab {
@@ -840,7 +852,7 @@ func (a *App) help() {
 		"e        edit it in your editor (unlocks first)",
 		"E        edit it here, in the built-in editor (Ctrl-S saves, Esc closes,",
 		"         Ctrl-F finds, F3 finds the next, Ctrl-G goes to a line,",
-		"         Ctrl-T shows line numbers)",
+		"         Ctrl-T shows line numbers; F1 lists the keys)",
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
 		"i        change its title and description (they show while locked)",
 		"/        filter the list by title or name (Enter keeps it, Esc clears)",
@@ -852,6 +864,7 @@ func (a *App) help() {
 		"J K      scroll the text a line     PgUp PgDn  a page     Space  a page down",
 		"Tab      move into the text to scroll it (Esc or Tab comes back)",
 		"q        quit",
+		"? F1     this list",
 		"",
 		"A file locks again when you move to another one, or after",
 		fmt.Sprintf("%s without a key press.", words(a.opts.Idle)),
@@ -859,7 +872,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 78, 28)
+	}, "\n"), 78, 31)
 }
 
 // ---- actions ------------------------------------------------------------
@@ -991,16 +1004,9 @@ func (a *App) copyCurrent() {
 			a.say("the file is empty: nothing to copy", true)
 			return
 		}
-		if a.holder == nil {
-			c := a.opts.Clipboard
-			if c == nil {
-				var err error
-				if c, err = clip.System(); err != nil {
-					a.say(err.Error(), true)
-					return
-				}
-			}
-			a.holder = clip.NewHolder(c)
+		if _, err := a.clipHolder(); err != nil {
+			a.say(err.Error(), true)
+			return
 		}
 		if err := a.holder.Copy(s.Plain, a.opts.ClipboardTTL, a.afterClear); err != nil {
 			a.say("couldn't copy: "+err.Error(), true)
@@ -1008,6 +1014,26 @@ func (a *App) copyCurrent() {
 		}
 		a.say(fmt.Sprintf("copied %s to the clipboard; it is cleared in %s", filepath.Base(s.Path), a.opts.ClipboardTTL), false)
 	})
+}
+
+// clipboard is the system clipboard (or the one a test gave).
+func (a *App) clipboard() (clip.Clipboard, error) {
+	if c := a.opts.Clipboard; c != nil {
+		return c, nil
+	}
+	return clip.System()
+}
+
+// clipHolder is what copies to the clipboard and clears it again, made on first use.
+func (a *App) clipHolder() (*clip.Holder, error) {
+	if a.holder == nil {
+		c, err := a.clipboard()
+		if err != nil {
+			return nil, err
+		}
+		a.holder = clip.NewHolder(c)
+	}
+	return a.holder, nil
 }
 
 // afterClear reports, from the timer's goroutine, what became of the clipboard.
