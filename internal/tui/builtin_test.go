@@ -440,3 +440,16 @@ func TestF1ListsTheEditorKeysAndReturnsToTheText(t *testing.T) {
 	h.waitFor("(editing, not saved)")
 	h.waitFor("Zfirst line")
 }
+
+func TestHelpBoxesShowTheirLongestLinesInFull(t *testing.T) {
+	h, _ := openBuiltin(t, Options{})
+	h.key(tcell.KeyF1)
+	h.waitFor("paste (the system clipboard)")
+	h.waitFor("Ctrl-K delete to the end of the line")
+	h.key(tcell.KeyEscape)
+	h.waitGone("Editor keys")
+	h.key(tcell.KeyEscape) // close the editor
+	h.press('?')
+	h.waitFor("Space  a page down")
+	h.waitFor("Enter, Esc or q closes this box.")
+}

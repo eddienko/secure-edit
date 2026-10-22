@@ -829,7 +829,7 @@ func (a *App) choiceDialog(text string, buttons []string, done func(index int)) 
 }
 
 // textDialog shows text in a box that closes on Enter, Esc or q.
-func (a *App) textDialog(name, title, text string, w, h int) {
+func (a *App) textDialog(name, title, text string) {
 	tv := tview.NewTextView().SetText(text).SetWrap(false)
 	tv.SetBorder(true).SetTitle(" "+title+" ").SetBorderPadding(0, 0, 1, 1)
 	tv.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
@@ -839,7 +839,16 @@ func (a *App) textDialog(name, title, text string, w, h int) {
 		}
 		return ev
 	})
-	a.openDialog(name, tv, w, h)
+	// Big enough for the longest line, as the text doesn't wrap: the border and the
+	// padding take two cells each.
+	w := runewidth.StringWidth(" "+title+" ") + 4
+	lines := strings.Split(text, "\n")
+	for _, l := range lines {
+		if lw := runewidth.StringWidth(l) + 4; lw > w {
+			w = lw
+		}
+	}
+	a.openDialog(name, tv, w, len(lines)+2)
 }
 
 func (a *App) help() {
@@ -872,7 +881,7 @@ func (a *App) help() {
 		"▪ sedit file    ○ age file    · other file",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 78, 31)
+	}, "\n"))
 }
 
 // ---- actions ------------------------------------------------------------

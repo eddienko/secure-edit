@@ -404,5 +404,5 @@ func (a *App) editHelp() {
 		"Ctrl-U    delete the line            Ctrl-W delete the word before",
 		"",
 		"Enter, Esc or q closes this box.",
-	}, "\n"), 74, 19)
+	}, "\n"))
 }
