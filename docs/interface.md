@@ -77,6 +77,7 @@ file, and it never starts another program or writes a temporary file.
 
 | Key | Action |
 |-----|--------|
+| `F1` | List these keys. |
 | `Ctrl-S` | Save, encrypted, keeping the previous version as `.bak`, and stay in the editor. |
 | `Esc` | Close. With unsaved changes it asks: keep editing (the default), save and close, or discard. |
 | `Ctrl-F` | Find text (any case) and select the first match after the cursor. |

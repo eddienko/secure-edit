@@ -469,7 +469,7 @@ func (a *App) hintItems() []string {
 		return []string{"arrows select", "^Q copy", "^X cut", "Esc cancel"}
 	}
 	if a.ed != nil {
-		return []string{"^S save", "^F find", "F3 next", "^G line", "^B select", "^T numbers", "Esc close"}
+		return []string{"^S save", "F1 keys", "^F find", "F3 next", "^G line", "^B select", "^T numbers", "Esc close"}
 	}
 	if a.prev.HasFocus() {
 		return []string{"↑↓ scroll", "PgUp/PgDn page", "y copy", "Esc back"}
@@ -848,7 +848,7 @@ func (a *App) help() {
 		"e        edit it in your editor (unlocks first)",
 		"E        edit it here, in the built-in editor (Ctrl-S saves, Esc closes,",
 		"         Ctrl-F finds, F3 finds the next, Ctrl-G goes to a line,",
-		"         Ctrl-T shows line numbers)",
+		"         Ctrl-T shows line numbers; F1 lists the keys)",
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
 		"i        change its title and description (they show while locked)",
 		"/        filter the list by title or name (Enter keeps it, Esc clears)",

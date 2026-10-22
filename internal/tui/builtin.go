@@ -116,6 +116,9 @@ func (a *App) editKey(ev *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyCtrlS:
 		a.saveBuiltin()
 		return nil
+	case tcell.KeyF1:
+		a.editHelp()
+		return nil
 	case tcell.KeyCtrlT:
 		on := a.ed.area.toggle()
 		a.say(map[bool]string{true: "line numbers on; lines don't wrap while they show", false: "line numbers off"}[on], false)
@@ -380,4 +383,26 @@ func (a *App) endMark(drop bool) {
 		e.area.Select(to, to)
 	}
 	a.editTitle()
+}
+
+// editHelp lists the editor's keys.
+func (a *App) editHelp() {
+	a.textDialog("edithelp", "Editor keys", strings.Join([]string{
+		"Ctrl-S    save (the previous version is kept as .bak)",
+		"Esc       close; asks first if there are unsaved changes",
+		"",
+		"Ctrl-F    find text (any case)       F3     next match",
+		"Ctrl-G    go to a line number        Ctrl-T line numbers on and off",
+		"",
+		"Ctrl-B    select with the arrow keys (Esc cancels); or Shift + arrows",
+		"Ctrl-L    select everything",
+		"Ctrl-Q    copy      Ctrl-X  cut      Ctrl-V  paste (the system clipboard)",
+		"Ctrl-Z    undo      Ctrl-Y  redo",
+		"",
+		"Ctrl-A    start of the line          Ctrl-E end of the line",
+		"Home End  the same                   Ctrl-K delete to the end of the line",
+		"Ctrl-U    delete the line            Ctrl-W delete the word before",
+		"",
+		"Enter, Esc or q closes this box.",
+	}, "\n"), 74, 19)
 }

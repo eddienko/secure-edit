@@ -427,3 +427,16 @@ func TestEditorBarDoesNotOfferHelpOrQuit(t *testing.T) {
 	h.key(tcell.KeyEscape)
 	h.waitFor("? help  q quit") // back in the list
 }
+
+func TestF1ListsTheEditorKeysAndReturnsToTheText(t *testing.T) {
+	h, _ := openBuiltin(t, Options{})
+	h.waitFor("F1 keys")
+	h.key(tcell.KeyF1)
+	h.waitFor("Editor keys")
+	h.waitFor("Ctrl-B    select with the arrow keys")
+	h.key(tcell.KeyEscape)
+	h.waitGone("Editor keys")
+	h.typeText("Z") // the keys go to the text again
+	h.waitFor("(editing, not saved)")
+	h.waitFor("Zfirst line")
+}
