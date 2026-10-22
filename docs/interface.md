@@ -71,6 +71,7 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `r` | Rename a folder (a new name; use `m` to move it), or rename or move a file (a new name, or a path relative to the file's folder). Its `.bak` and stored password go with it. |
 | `d` | Delete a file, after a confirmation that defaults to Cancel; its `.bak` and stored password go too. A folder can be deleted only when it is empty (a leftover `.DS_Store` doesn't count); otherwise the bar says what is in it. |
 | `p` | Change the file's password. |
+| `x` | Export a copy for someone else; see **Exporting a file** below. |
 | `l` | Lock now. |
 | `v` | Show the names of titled files under their titles, in dim text, or go back to titles only. The list starts with titles only each time. A file without a title stays on one row, and a folder is listed by its title in both. |
 | `R` | Re-read the folder from disk. |
@@ -190,10 +191,27 @@ reverse video (the selected file and the bar at the bottom are reversed) and fro
 symbols (`▪ ▫ ○ ·`). So it follows your theme, whether light, dark or see-through,
 and nothing can end up unreadable because a color blends into your background.
 
-**What it does not do (yet).** Sharing, importing, key generation and encrypting a
+**What it does not do (yet).** Importing, key generation and encrypting a
 plain file are only in the [command line](command-line.md). There is no search
 inside files, and no mouse.
 Files larger than 1 MiB are shown cut off, and binary content is not displayed.
+
+**Exporting a file.** `x` makes a copy of the selected file that someone else can read
+without knowing its password, encrypted to their public key (the same as
+`sedit --share`; see [sharing](command-line.md#sharing-a-file-with-someone)). A box asks for the
+recipients, one per line: an age key (`age1...`), an SSH public key (`ssh-ed25519 ...`
+or `ssh-rsa ...`), or the path of a file of keys such as `~/keys.txt`. Then you choose:
+
+- **Write a file:** `exported/NAME.age` inside the top folder, made with mode `0600`.
+  An earlier export is never overwritten; the next one is `NAME.2.age`. They open it
+  with `age -d -i KEY`, or with `sedit --import`.
+- **Copy as text:** the same, as armored text (`-----BEGIN AGE ENCRYPTED FILE-----`)
+  on the clipboard, to paste into a chat or an email. It is encrypted, so it is not
+  cleared by a timer.
+
+It is a snapshot: later changes of yours don't reach them, and you can't take a copy
+back. The file is unlocked for the moment it takes and locked again, and the title and
+description do not travel with it. A private key is refused and never shown.
 
 **Security notes.** The interface uses the terminal's alternate screen, so what it
 shows isn't left in your scrollback when you quit. But text on screen is visible to

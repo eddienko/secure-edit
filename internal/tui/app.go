@@ -567,9 +567,9 @@ func (a *App) hintItemsFor() []string {
 	case e.Kind != KindSedit:
 		return []string{move, "/ filter", "n new", "R refresh"}
 	case a.session != nil && !a.session.Locked() && a.session.Path == e.Path:
-		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "/ filter", "p password", "r rename", "m move", "d delete", "n new"}
+		return []string{move, "e edit", "y copy", "J/K scroll", "l lock", "i info", "/ filter", "p password", "r rename", "m move", "d delete", "n new", "x export"}
 	}
-	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "/ filter", "n new", "r rename", "m move", "d delete", "p password"}
+	return []string{move, "⏎ unlock", "e edit", "y copy", "i info", "/ filter", "n new", "r rename", "m move", "d delete", "p password", "x export"}
 }
 
 // hintsFor lays the hints out in width cells: as many as fit, in order, with
@@ -737,6 +737,8 @@ func (a *App) capture(ev *tcell.EventKey) *tcell.EventKey {
 			a.editCurrent()
 		case 'E':
 			a.editBuiltin()
+		case 'x':
+			a.exportCurrent()
 		case 'y':
 			a.copyCurrent()
 		case 'i':
@@ -929,6 +931,7 @@ func (a *App) help() {
 		"         Ctrl-F finds, F3 finds the next, Ctrl-G goes to a line,",
 		"         Ctrl-T shows line numbers; F1 lists the keys)",
 		fmt.Sprintf("y        copy the whole text to the clipboard (cleared after %s)", a.opts.ClipboardTTL),
+		"x        export a copy for someone else, encrypted to their public key",
 		"i        change its title and description (they show while locked)",
 		"/        filter the list by title or name (Enter keeps it, Esc clears)",
 		"n        new file      N     new folder          m  move to a folder",

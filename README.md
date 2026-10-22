@@ -32,6 +32,7 @@ The list on the left shows your files and folders; the preview on the right stay
 | `e` | Edit it in your editor (`$SEDIT_EDITOR`, `$VISUAL`, `$EDITOR`, or vim) |
 | `E` | Edit it in the built-in editor (`Ctrl-S` save, `Ctrl-F` find, `Ctrl-B` select, `Ctrl-Q` copy) |
 | `y` | Copy the text to the clipboard, cleared again after 30 seconds |
+| `x` | Export a copy for someone else, encrypted to their public key (a file or text to paste) |
 | `n` `N` | New file, new folder (each with an optional title and description) |
 | `/` | Filter the list by title or name |
 | `?` `q` | All the keys, quit |
