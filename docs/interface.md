@@ -53,7 +53,7 @@ as dots). The preview then shows the text, and you can scroll it with **Tab**.
 | `↑` `↓` `Home` `End` | Move (`g` and `G` also go to the top and bottom). |
 | `→` `←` | Open and close a folder; `←` on a file goes to its folder. |
 | `Enter` | Unlock and show the file (or open or close a folder). |
-| `e` | Edit in your editor: unlocks first, then runs the same editing as `sedit FILE`, including the vim protections and the `SEDIT ENCRYPTED` banner. The previous version is kept as `.bak`. |
+| `e` | Edit in your editor: unlocks first, then runs the same editing as `sedit FILE`, including the vim protections and the `SEDIT ENCRYPTED` banner. The previous version is kept as `.bak`; if the file was changed by another program meanwhile, your text is saved as `FILE.conflict` instead. |
 | `E` | Edit in the built-in editor, in the right pane, with no other program: unlocks first. See **The built-in editor** below. |
 | `y` | Copy the whole text to the clipboard (unlocks first if needed). It is cleared again after 30 seconds; see **Clipboard** below. |
 | `/` | Filter the list. Type words and only the files whose title or name contain all of them (any case) stay, with the folders leading to them opened for you; searches the whole tree, up to 5000 entries. `↑` `↓` pick a match while you type, **Enter** keeps the filter and goes back to the list, **Esc** removes it (also from the list). The first match is selected, and the one you were on stays selected if it still matches. A file that was just made or moved and doesn't match clears the filter rather than disappear. |
