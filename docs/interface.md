@@ -85,8 +85,9 @@ file, and it never starts another program or writes a temporary file.
 | `Ctrl-T` | Show or hide line numbers. While they show, lines don't wrap and long ones scroll sideways. |
 | `Ctrl-A` `Ctrl-E` | Go to the start and end of the line (also `Home` and `End`), whole lines, not just the wrapped row. |
 | `Ctrl-Z` `Ctrl-Y` | Undo and redo. |
-| `Ctrl-L` | Select everything. |
-| `Ctrl-Q` `Ctrl-X` `Ctrl-V` | Copy, cut and paste inside the editor. (This clipboard is the editor's own, not the system one; use `y` to copy the text out.) Pasting from the terminal works as usual. |
+| `Shift` + arrows | Select text (`Shift` with `Home`, `End`, `PgUp` or `PgDn` extends the selection, to the edge of the wrapped row for `Home` and `End`; `Ctrl-L` selects everything). |
+| `Ctrl-B` | Select without `Shift`: the arrow keys, `Home`, `End`, `PgUp` and `PgDn` then select, across as many lines as you like, until you copy (`Ctrl-Q`), cut (`Ctrl-X`) or press `Esc` to cancel (`Esc` ends the selecting; it doesn't close the editor). For terminals that keep `Shift` with the up and down arrows for themselves, so that only a single row can be selected. The pane's title says `(selecting)`. |
+| `Ctrl-Q` `Ctrl-X` `Ctrl-V` | Copy the selection, cut it, and paste. These use the **system clipboard**, so you can paste into other programs and back. Copied text is **cleared after 30 seconds** like `y` (or whatever `--clipboard-timeout` says), only if it is still what is there. Pasting from the terminal (Cmd-V) works too, as one step to undo. Without a clipboard tool (`pbcopy`, `wl-copy`, `xclip` or `xsel`) the editor says so and keeps its own copy until you close it. |
 
 The pane's title says `(editing)`, or `(editing, not saved)` after a change. The
 idle timer **does not lock** a file with unsaved changes, so nothing is thrown away

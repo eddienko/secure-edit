@@ -137,6 +137,7 @@ func New(root string, opts Options) (*App, error) {
 
 	a.reload("")
 	a.app.SetRoot(a.pages, true).SetFocus(a.tree)
+	a.app.EnablePaste(true)
 	a.app.SetInputCapture(a.capture)
 	a.status.hints = a.hintsFor
 	a.renderStatus()
@@ -464,8 +465,11 @@ const helpTail = "? help  q quit"
 
 // hintItems are the keys that matter right now, most useful first.
 func (a *App) hintItems() []string {
+	if a.ed != nil && a.ed.marking {
+		return []string{"arrows select", "^Q copy", "^X cut", "Esc cancel"}
+	}
 	if a.ed != nil {
-		return []string{"^S save", "^F find", "F3 next", "^G line", "^T numbers", "Esc close"}
+		return []string{"^S save", "^F find", "F3 next", "^G line", "^B select", "^T numbers", "Esc close"}
 	}
 	if a.prev.HasFocus() {
 		return []string{"↑↓ scroll", "PgUp/PgDn page", "y copy", "Esc back"}
@@ -991,16 +995,9 @@ func (a *App) copyCurrent() {
 			a.say("the file is empty: nothing to copy", true)
 			return
 		}
-		if a.holder == nil {
-			c := a.opts.Clipboard
-			if c == nil {
-				var err error
-				if c, err = clip.System(); err != nil {
-					a.say(err.Error(), true)
-					return
-				}
-			}
-			a.holder = clip.NewHolder(c)
+		if _, err := a.clipHolder(); err != nil {
+			a.say(err.Error(), true)
+			return
 		}
 		if err := a.holder.Copy(s.Plain, a.opts.ClipboardTTL, a.afterClear); err != nil {
 			a.say("couldn't copy: "+err.Error(), true)
@@ -1008,6 +1005,26 @@ func (a *App) copyCurrent() {
 		}
 		a.say(fmt.Sprintf("copied %s to the clipboard; it is cleared in %s", filepath.Base(s.Path), a.opts.ClipboardTTL), false)
 	})
+}
+
+// clipboard is the system clipboard (or the one a test gave).
+func (a *App) clipboard() (clip.Clipboard, error) {
+	if c := a.opts.Clipboard; c != nil {
+		return c, nil
+	}
+	return clip.System()
+}
+
+// clipHolder is what copies to the clipboard and clears it again, made on first use.
+func (a *App) clipHolder() (*clip.Holder, error) {
+	if a.holder == nil {
+		c, err := a.clipboard()
+		if err != nil {
+			return nil, err
+		}
+		a.holder = clip.NewHolder(c)
+	}
+	return a.holder, nil
 }
 
 // afterClear reports, from the timer's goroutine, what became of the clipboard.
