@@ -512,8 +512,12 @@ func (a *App) hintsFor(width int) string {
 	if a.filterEditing {
 		return a.filterLine()
 	}
-	text := helpTail
-	room := width - runewidth.StringWidth(helpTail) - 2
+	tail := helpTail
+	if a.ed != nil {
+		tail = "" // in the editor ? and q are letters to type, not keys
+	}
+	text := tail
+	room := width - runewidth.StringWidth(tail) - 2
 	var items []string
 	for _, it := range a.hintItems() {
 		room -= runewidth.StringWidth(it) + 2
@@ -523,7 +527,7 @@ func (a *App) hintsFor(width int) string {
 		items = append(items, it)
 	}
 	if len(items) > 0 {
-		text = strings.Join(items, "  ") + "  " + text
+		text = strings.TrimRight(strings.Join(items, "  ")+"  "+text, " ")
 	}
 	return text
 }

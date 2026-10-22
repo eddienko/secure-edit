@@ -410,3 +410,20 @@ func TestMarkingEscapeCancelsAndCutDeletes(t *testing.T) {
 		t.Errorf("clipboard = %q", got)
 	}
 }
+
+func TestEditorBarDoesNotOfferHelpOrQuit(t *testing.T) {
+	h, _ := openBuiltin(t, Options{})
+	h.waitFor("^S save")
+	h.notOnScreen("? help")
+	h.notOnScreen("q quit")
+	h.typeText("q?")
+	h.waitFor("(editing, not saved)") // they were typed into the text
+	h.key(tcell.KeyCtrlB)
+	h.waitFor("the arrow keys select now")
+	h.key(tcell.KeyEscape)
+	h.notOnScreen("q quit")
+	h.key(tcell.KeyCtrlS)
+	h.waitFor("saved notes.txt")
+	h.key(tcell.KeyEscape)
+	h.waitFor("? help  q quit") // back in the list
+}
