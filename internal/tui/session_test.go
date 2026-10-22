@@ -422,3 +422,46 @@ func TestRekeyKeepsTheSessionUsableEvenIfTheKeychainFails(t *testing.T) {
 		t.Error("the file or the session did not take the new password")
 	}
 }
+
+func TestEditDoesNotOverwriteAFileChangedWhileTheEditorWasOpen(t *testing.T) {
+	useStore(t)
+	path := seditFile(t, t.TempDir(), "a.txt", "pw", "original\n")
+	s, _ := OpenSession(path)
+	s.UnlockWith([]byte("pw"))
+	useEditor(t, `echo mine >> "$1"`+"\n"+`printf theirs > '`+path+"'\n")
+
+	saved, err := s.Edit()
+	var ce *vault.ConflictError
+	if saved || !errors.As(err, &ce) {
+		t.Fatalf("saved=%v err=%v", saved, err)
+	}
+	if got := string(readFile(t, path)); got != "theirs" {
+		t.Errorf("the other change was overwritten: %q", got)
+	}
+	if got := decrypt(t, ce.Conflict, "pw"); got != "original\nmine\n" {
+		t.Errorf("the conflict file holds %q", got)
+	}
+	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
+		t.Error("nothing was saved over the file, so there should be no backup of it")
+	}
+}
+
+func TestEditDoesNotOverwriteANewFileCreatedWhileTheEditorWasOpen(t *testing.T) {
+	useStore(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new.txt")
+	s := NewSession(path, []byte("pw"))
+	useEditor(t, `echo mine >> "$1"`+"\n"+`printf theirs > '`+path+"'\n")
+
+	_, err := s.Edit()
+	var ce *vault.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("got %v", err)
+	}
+	if got := string(readFile(t, path)); got != "theirs" {
+		t.Errorf("their file was overwritten: %q", got)
+	}
+	if got := decrypt(t, ce.Conflict, "pw"); got != "mine\n" {
+		t.Errorf("the conflict file holds %q", got)
+	}
+}

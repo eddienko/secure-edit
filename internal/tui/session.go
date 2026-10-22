@@ -146,6 +146,20 @@ func (s *Session) Edit() (saved bool, err error) {
 		vault.Wipe(edited)
 		return false, nil
 	}
+	// Another program may have written the file while the editor was open (the
+	// lock only holds off other sedit processes): don't overwrite that.
+	if changed, err := vault.Changed(s.Path, s.Cipher); err != nil {
+		vault.Wipe(edited)
+		return false, err
+	} else if changed {
+		m := s.NewMeta
+		if s.Cipher != nil {
+			m, _ = vault.ReadMeta(s.Cipher)
+		}
+		err := vault.SaveConflict(s.Path, s.Password, edited, m)
+		vault.Wipe(edited)
+		return false, err
+	}
 	var saveErr error
 	if s.Cipher == nil {
 		saveErr = vault.SaveMeta(s.Path, s.Password, edited, nil, s.NewMeta)

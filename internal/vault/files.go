@@ -1,6 +1,8 @@
 package vault
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -87,4 +89,50 @@ func ResolvePath(path string) (string, error) {
 		return "", fmt.Errorf("%s is a symlink whose target can't be resolved: %w", path, err)
 	}
 	return real, nil
+}
+
+// Changed reports whether the file at path is no longer what was read from it,
+// prev, while it was being edited. A file that doesn't exist, or is empty, counts
+// as having no content, which is what prev is for a new file.
+func Changed(path string, prev []byte) (bool, error) {
+	cur, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	return !bytes.Equal(cur, prev) && !(len(cur) == 0 && len(prev) == 0), nil
+}
+
+// ConflictError says that a file was changed by someone else while it was being
+// edited, so the edit was not saved over it but beside it.
+type ConflictError struct {
+	Path     string // the file
+	Conflict string // where the edited text was saved instead
+}
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("%s was changed on disk while you were editing, so it was not overwritten; your text is saved as %s",
+		filepath.Base(e.Path), filepath.Base(e.Conflict))
+}
+
+// SaveConflict writes content, encrypted under password, beside path as
+// FILE.conflict (or .conflict.2, and so on, if that is taken) and returns the
+// error that says so. It is for an edit that can't be saved over a file that was
+// changed in the meantime.
+func SaveConflict(path string, password, content []byte, m Meta) error {
+	for n := 1; n <= 99; n++ {
+		name := path + ".conflict"
+		if n > 1 {
+			name = fmt.Sprintf("%s.conflict.%d", path, n)
+		}
+		if _, err := os.Lstat(name); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := SaveMeta(name, password, content, nil, m); err != nil {
+			return fmt.Errorf("%s changed on disk while you were editing, and your text could not be saved beside it: %w", filepath.Base(path), err)
+		}
+		return &ConflictError{Path: path, Conflict: name}
+	}
+	return fmt.Errorf("%s changed on disk while you were editing, and there are too many .conflict files beside it to save yours", filepath.Base(path))
 }

@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,5 +109,68 @@ func TestSaveFailsWhenBackupCannotBeWritten(t *testing.T) {
 	}
 	if now, _ := os.ReadFile(path); !bytes.Equal(now, prev) {
 		t.Error("the file changed although the backup failed")
+	}
+}
+
+func TestChanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "f")
+	cases := []struct {
+		name string
+		disk []byte // nil: the file doesn't exist
+		prev []byte
+		want bool
+	}{
+		{"same", []byte("abc"), []byte("abc"), false},
+		{"different", []byte("abd"), []byte("abc"), true},
+		{"gone", nil, []byte("abc"), true},
+		{"new file still missing", nil, nil, false},
+		{"new file now empty", []byte{}, nil, false},
+		{"new file now there", []byte("x"), nil, true},
+		{"emptied", []byte{}, []byte("abc"), true},
+	}
+	for _, c := range cases {
+		os.Remove(path)
+		if c.disk != nil {
+			os.WriteFile(path, c.disk, 0o600)
+		}
+		got, err := Changed(path, c.prev)
+		if err != nil || got != c.want {
+			t.Errorf("%s: Changed = %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+}
+
+func TestSaveConflictWritesBesideTheFileAndNeverOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes")
+	os.WriteFile(path, []byte("theirs"), 0o600)
+
+	err := SaveConflict(path, []byte("pw"), []byte("mine"), Meta{Title: "T"})
+	var ce *ConflictError
+	if !errors.As(err, &ce) || ce.Conflict != path+".conflict" {
+		t.Fatalf("got %v", err)
+	}
+	if !strings.Contains(err.Error(), "notes.conflict") {
+		t.Errorf("the message should name the conflict file: %v", err)
+	}
+	data, _ := os.ReadFile(ce.Conflict)
+	if got, derr := Decrypt([]byte("pw"), data); derr != nil || string(got) != "mine" {
+		t.Fatalf("conflict file = %q, %v", got, derr)
+	}
+	if m, _ := ReadMeta(data); m.Title != "T" {
+		t.Errorf("the labels should be kept: %+v", m)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "theirs" {
+		t.Errorf("the file itself was touched: %q", b)
+	}
+
+	// A second conflict gets its own file rather than replacing the first.
+	err = SaveConflict(path, []byte("pw"), []byte("mine too"), Meta{})
+	if !errors.As(err, &ce) || ce.Conflict != path+".conflict.2" {
+		t.Fatalf("second conflict: %v", err)
+	}
+	if first, _ := os.ReadFile(path + ".conflict"); len(first) == 0 {
+		t.Error("the first conflict file is gone")
 	}
 }

@@ -202,6 +202,17 @@ func edit(path string, remember bool, choice pwChoice) (err error) {
 		fmt.Fprintf(os.Stderr, "sedit: no changes to %s\n", path)
 		return nil
 	}
+	// Another program may have written the file while the editor was open (the
+	// lock only holds off other sedit processes): don't overwrite that.
+	if changed, err := vault.Changed(path, data); err != nil {
+		return err
+	} else if changed {
+		meta := createMeta
+		if data != nil {
+			meta, _ = vault.ReadMeta(data)
+		}
+		return vault.SaveConflict(path, password, edited, meta)
+	}
 	return saveFile(path, password, edited, data, src)
 }
 

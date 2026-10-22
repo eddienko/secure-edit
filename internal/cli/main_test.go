@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"github.com/eddienko/secure-edit/internal/keystore"
 	"github.com/eddienko/secure-edit/internal/vault"
 	"os"
@@ -252,5 +253,37 @@ func TestRememberWithoutStore(t *testing.T) {
 	}
 	if err := forget("whatever"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestEditDoesNotOverwriteAFileChangedWhileEditing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets")
+	if err := vault.Save(path, []byte("pw"), []byte("original\n"), nil); err != nil {
+		t.Fatal(err)
+	}
+	// The "editor" adds a line to the text, and meanwhile something else (a sync
+	// tool, say) replaces the file.
+	script := filepath.Join(dir, "ed.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\necho mine >> \"$1\"\nprintf theirs > '"+path+"'\n"), 0o755)
+	t.Setenv("EDITOR", script)
+	t.Setenv("VISUAL", "")
+	t.Setenv("SEDIT_EDITOR", "")
+
+	withStdin(t, "pw\n")
+	err := edit(path, false, choiceAsk)
+	var ce *vault.ConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want a conflict, got %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "theirs" {
+		t.Errorf("the other change was overwritten: %q", b)
+	}
+	data, _ := os.ReadFile(ce.Conflict)
+	if got, derr := vault.Decrypt([]byte("pw"), data); derr != nil || string(got) != "original\nmine\n" {
+		t.Errorf("the conflict file holds %q, %v", got, derr)
+	}
+	if _, err := os.Stat(vault.BackupPath(path)); err == nil {
+		t.Error("a backup of the other change would be wrong: nothing was saved over it")
 	}
 }

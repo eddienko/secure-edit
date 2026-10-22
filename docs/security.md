@@ -50,7 +50,10 @@ defend against malware or an attacker on your machine while the file is open.
   which is left on disk (empty) after exit. It is released automatically if
   `sedit` crashes. It may be unreliable on some network filesystems such as NFS,
   and it does not protect copies of the file elsewhere. `sedit -p` doesn't take
-  the lock, which is safe because saves are atomic renames.
+  the lock, which is safe because saves are atomic renames. A program that isn't
+  `sedit` ignores the lock, so `sedit` checks, just before saving an edit, that the
+  file is still the one it read; if not, it saves your text beside it as
+  `FILE.conflict` instead of overwriting (see [the command line](command-line.md)).
 - **Unix only.** The lock uses `syscall.Flock`, so it won't build on Windows.
 - **No recovery.** There is no password reset. Lose the passphrase and the data
   is gone.

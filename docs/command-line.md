@@ -327,6 +327,20 @@ Things to know:
 - The original `.age` file is left as it is. It stays readable by anyone who has
   the key, so delete it if you no longer need it.
 
+## When the file changes while you edit it
+
+Another `sedit` can't edit a file you have open (it is locked), but a program that
+isn't `sedit`, such as a sync tool, `git` or `cp`, can still replace it. So when your
+editor closes, `sedit` checks that the file on disk is still the one it read. If not,
+it does **not** save over it. It saves your text, encrypted with the same password
+and keeping the title and description, beside it as `FILE.conflict` (`FILE.conflict.2`
+and so on if that name is taken), and says so, and exits with an error.
+Compare the two, merge by hand (`sedit -p` prints each), and delete the
+`.conflict` file. The interface lists it like any other `sedit` file, and does the
+same when you edit with `e`. A password remembered in the Keychain belongs to the
+original file, so `FILE.conflict` asks for the password. The check is made just before
+saving, so a change in the last instant can still go unnoticed.
+
 ## Restoring the previous version
 
 ```sh
